@@ -5,7 +5,7 @@ no la parte PDF de compatibilidad. La misma librería corre en Node (≥ 22) y e
 
 - **App:** [iatosvg.dotrino.com](https://iatosvg.dotrino.com/) — PWA en `web/` (Vite). Convierte
   en el aparato, en un worker: los archivos no se suben. Uso en el
-  [wiki](https://wiki.dotrino.com/herramientas/iatosvg/).
+  [wiki](https://wiki.dotrino.com/apps/iatosvg/).
 - **CLI y librería:** `src/` (`@dotrino/iatosvg`). Dependencia única: el descompresor Zstandard
   [fzstd](https://github.com/101arrowz/fzstd), copiado en `src/vendor/` (MIT).
 

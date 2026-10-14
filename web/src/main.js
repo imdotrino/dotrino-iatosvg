@@ -55,6 +55,7 @@ const I18N = {
     privacy: 'Tus archivos no salen de tu equipo: se convierten aquí y no se guardan en ningún lado.',
     info: 'El SVG lleva capas, degradados, fotos y mesas de trabajo. El texto sale como formas (no editable), y las mallas de degradado y los símbolos todavía no se dibujan.',
     infoLabel: 'Qué sale en el SVG',
+    howto: 'Cómo se usa',
     version: v => `Versión ${v}`,
     warn: [
       [/^placed file "(.*)" not found: its low-resolution preview was used$/, (m) => `Falta la foto «${m[1]}»: va su vista previa en baja resolución.`],
@@ -106,6 +107,7 @@ const I18N = {
     privacy: 'Your files never leave your device: they are converted here and not saved anywhere.',
     info: 'The SVG keeps layers, gradients, photos and artboards. Text comes out as shapes (not editable), and gradient meshes and symbols are not drawn yet.',
     infoLabel: 'What the SVG keeps',
+    howto: 'How to use it',
     version: v => `Version ${v}`,
     warn: [
       [/^placed file "(.*)" not found: its low-resolution preview was used$/, (m) => `The photo "${m[1]}" is missing: its low-resolution preview is used.`],
@@ -328,7 +330,7 @@ function render () {
     storeOk ? null : h('p', { class: 'notice' }, L.storeProblem),
     h('section', { class: 'jobs', id: 'jobs' }, ...jobs.map(jobCard)),
     h('section', { class: 'history', id: 'history' }),
-    h('footer', {}, h('p', {}, L.privacy), h('p', { class: 'muted' }, L.version(MINE.version))),
+    h('footer', {}, h('p', {}, L.privacy), h('p', { class: 'muted' }, h('a', { href: lang === 'en' ? 'https://wiki.dotrino.com/en/apps/iatosvg/' : 'https://wiki.dotrino.com/apps/iatosvg/' }, L.howto), ' · ', L.version(MINE.version))),
   ].filter(Boolean))
   renderHistory()
 }
