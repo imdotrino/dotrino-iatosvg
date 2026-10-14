@@ -1,10 +1,10 @@
-# iatosvg
+# dotrino-iatosvg
 
 Convierte archivos `.ai` de Adobe Illustrator a SVG **leyendo los datos de edición nativos**,
 no la parte PDF de compatibilidad. Node ≥ 22.15, sin dependencias.
 
 ```bash
-npx iatosvg "Arte.ai"                  # escribe Arte.svg al lado
+npx @dotrino/iatosvg "Arte.ai"                  # escribe Arte.svg al lado
 iatosvg a.ai b.ai -o salida/           # varios, a un directorio
 iatosvg a.ai --all -o salida/          # un SVG por mesa de trabajo
 iatosvg a.ai --dump                    # vuelca los datos de edición decodificados (a.ai.ps)
@@ -14,7 +14,7 @@ Como módulo:
 
 ```js
 import fs from 'node:fs'
-import { aiToSvg, readAi, editingData } from 'iatosvg'
+import { aiToSvg, readAi, editingData } from '@dotrino/iatosvg'
 const { svg, doc } = aiToSvg(fs.readFileSync('Arte.ai'), { artboard: 0 })
 ```
 

@@ -1,5 +1,5 @@
 {
-  "name": "iatosvg",
+  "name": "@dotrino/iatosvg",
   "version": "0.1.0",
   "description": "Adobe Illustrator .ai → SVG, reading the native editing data (not the PDF-compatible part). No dependencies.",
   "type": "module",
@@ -9,5 +9,6 @@
   "scripts": { "test": "node --test test/*.test.mjs" },
   "engines": { "node": ">=22.15" },
   "license": "MIT",
+  "repository": "github:imdotrino/dotrino-iatosvg",
   "files": ["src", "README.md"]
 }
