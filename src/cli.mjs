@@ -43,7 +43,7 @@ for (const file of files) {
   try {
     const buf = fs.readFileSync(file)
     const base = path.basename(file).replace(/\.ai$/i, '')
-    const outDir = opts.out && (files.length > 1 || opts.all || isDir(opts.out)) ? opts.out : null
+    const outDir = opts.out && (files.length > 1 || opts.all || isDir(opts.out) || opts.out.endsWith('/')) ? opts.out : null
     if (outDir) fs.mkdirSync(outDir, { recursive: true })
     if (opts.dump) {
       const { data, codec } = editingData(buf)
