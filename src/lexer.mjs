@@ -7,11 +7,14 @@
 // - Los bytes de una imagen tras `%%BeginData:` son UN token `data`; la vista previa binaria
 //   de un archivo enlazado es UN token `preview`.
 
-const PREVIEW_BEGIN = Buffer.from('%AI26_BeginPlacedObjectPreview')
-const PREVIEW_END = Buffer.from('%AI26_EndPlacedObjectPreview')
-const DOCUMENT_BEGIN = Buffer.from('%%BeginDocument')
-const DOCUMENT_END = Buffer.from('%%EndDocument')
-const END_DATA = Buffer.from('%%EndData')
+import { ascii, find, latin1 } from './bytes.mjs'
+
+const PREVIEW_BEGIN = ascii('%AI26_BeginPlacedObjectPreview')
+const PREVIEW_END = ascii('%AI26_EndPlacedObjectPreview')
+const DOCUMENT_BEGIN = ascii('%%BeginDocument')
+const DOCUMENT_END = ascii('%%EndDocument')
+const END_DATA = ascii('%%EndData')
+const startsWith = (u8, prefix) => u8.length >= prefix.length && prefix.every((b, i) => u8[i] === b)
 
 const isSpace = b => b === 0x20 || b === 0x09 || b === 0x0d || b === 0x0a || b === 0x0c || b === 0
 const isEol = b => b === 0x0d || b === 0x0a
@@ -46,7 +49,7 @@ export class Lexer {
 
   /** Salta hasta después de `needle` y devuelve lo saltado. */
   skipPast(needle) {
-    const i = this.src.indexOf(needle, this.pos)
+    const i = find(this.src, needle, this.pos)
     const end = i < 0 ? this.src.length : i + needle.length
     const out = this.src.subarray(this.pos, end)
     this.pos = end
@@ -72,24 +75,28 @@ export class Lexer {
           const t = this.special(line)
           if (t) { t.hidden = prefixed; return t }
         }
-        if (start) return { t: 'comment', v: line.subarray(1).toString('latin1'), hidden: false }
+        if (start) return { t: 'comment', v: latin1(line, 1), hidden: false }
         continue
       }
       const hidden = this.hidden
       this.pos++
       if (b === 0x28 /* ( */) return { t: 'str', v: this.string(), hidden }
       if (b === 0x3c /* < */) {
-        const end = this.src.indexOf('>', this.pos)
-        const hex = this.src.subarray(this.pos, end < 0 ? this.src.length : end).toString('latin1').replace(/[^0-9a-fA-F]/g, '')
-        this.pos = end < 0 ? this.src.length : end + 1
-        return { t: 'hex', v: Buffer.from(hex.length % 2 ? hex + '0' : hex, 'hex'), hidden }
+        const end = this.src.indexOf(0x3e, this.pos)
+        const stop = end < 0 ? this.src.length : end
+        let hex = latin1(this.src, this.pos, stop).replace(/[^0-9a-fA-F]/g, '')
+        if (hex.length % 2) hex += '0'
+        const bytes = new Uint8Array(hex.length >> 1)
+        for (let k = 0; k < bytes.length; k++) bytes[k] = parseInt(hex.substr(k * 2, 2), 16)
+        this.pos = stop + (end < 0 ? 0 : 1)
+        return { t: 'hex', v: bytes, hidden }
       }
       if (b === 0x5b || b === 0x5d || b === 0x7b || b === 0x7d || b === 0x29 || b === 0x3e) {
         return { t: 'word', v: String.fromCharCode(b), hidden }
       }
-      if (b === 0x2f /* / */) return { t: 'name', v: this.word().toString('latin1'), hidden }
+      if (b === 0x2f /* / */) { const w = this.word(); return { t: 'name', v: latin1(w), hidden } }
       this.pos--
-      const w = this.word().toString('latin1')
+      const w = latin1(this.word())
       const n = number(w)
       return n === null ? { t: 'word', v: w, hidden } : { t: 'num', v: n, hidden }
     }
@@ -98,25 +105,25 @@ export class Lexer {
   /** Lo que una línea de comentario significa cuando abre una sección que se lee distinto. */
   special(line) {
     for (const [begin, end, kind] of [[PREVIEW_BEGIN, PREVIEW_END, 'preview'], [DOCUMENT_BEGIN, DOCUMENT_END, 'comment']]) {
-      if (line.subarray(0, begin.length).equals(begin)) {
+      if (startsWith(line, begin)) {
         const from = this.pos
-        const i = this.src.indexOf(end, this.pos)
+        const i = find(this.src, end, this.pos)
         const after = i < 0 ? this.src.length : i
         this.pos = after
         this.line()
         if (kind === 'preview') return { t: 'preview', v: this.src.subarray(from, after), hidden: false }
-        return { t: 'comment', v: line.subarray(1).toString('latin1'), hidden: false }
+        return { t: 'comment', v: latin1(line, 1), hidden: false }
       }
     }
-    const text = line.toString('latin1')
-    if (!text.startsWith('%%BeginData:')) return null
+    if (!startsWith(line, ascii('%%BeginData:'))) return null
+    const text = latin1(line)
     const n = parseInt(text.slice('%%BeginData:'.length).trim().split(/\s+/)[0], 10)
     if (!Number.isFinite(n)) return null
     // La cuenta empieza tras el carácter de fin de la línea del comentario.
     const from = this.pos + 1
     let skip = 0
     while (from + skip < this.src.length && isSpace(this.src[from + skip])) skip++
-    const head = this.src.subarray(from + skip, from + skip + 4).toString('latin1')
+    const head = latin1(this.src, from + skip, Math.min(this.src.length, from + skip + 4))
     const hidden = head.startsWith('%_XI')
     if (hidden) skip += 2
     else if (!head.startsWith('XI')) return null
@@ -127,7 +134,7 @@ export class Lexer {
     const declared = Math.max(Math.min(from + n, this.src.length), data)
     const wStart = Math.max(declared - 4, data)
     const wEnd = Math.min(declared + n * 2 + 64, this.src.length)
-    const i = this.src.subarray(wStart, wEnd).indexOf(END_DATA)
+    const i = find(this.src.subarray(wStart, wEnd), END_DATA)
     const end = i < 0 ? declared : wStart + i
     this.pos = end
     let samples = this.src.subarray(data, end)
@@ -175,15 +182,13 @@ export class Lexer {
           } else out.push(e)
       }
     }
-    return Buffer.from(out)
+    return Uint8Array.from(out)
   }
 }
 
 /** Texto de los bytes de los datos: UTF-8, y si no, Windows-1252. */
-export function text(buf) {
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(buf)
-  } catch {
-    return new TextDecoder('windows-1252').decode(buf)
-  }
+const UTF8 = new TextDecoder('utf-8', { fatal: true })
+const CP1252 = new TextDecoder('windows-1252')
+export function text (buf) {
+  try { return UTF8.decode(buf) } catch { return CP1252.decode(buf) }
 }

@@ -2,6 +2,7 @@
 // un punto (x, y) del arte sale como (x - x0, y1 - y), con (x0, y1) la esquina superior
 // izquierda de la mesa de trabajo, así que el viewBox es `0 0 ancho alto`.
 import { mul, apply, invert } from './reader.mjs'
+import { toBase64 } from './bytes.mjs'
 
 const fmt = v => (Math.abs(v) < 1e-9 ? '0' : Number(v.toFixed(3)).toString())
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
@@ -66,8 +67,9 @@ function node(n, ctx) {
       return `<path${common(n)} d="${pathData(n, ctx)}"${paintAttrs(n, ctx)}/>\n`
     }
     case 'image': {
+      if (!n.bytes || !n.xf) return ''
       const m = mul(ctx.T, n.xf)
-      const href = `data:${n.mime};base64,${n.bytes.toString('base64')}`
+      const href = `data:${n.mime};base64,${toBase64(n.bytes)}`
       const link = n.link ? ` data-link="${esc(n.link)}"` : ''
       return `<image${common(n)}${link} width="${n.w}" height="${n.h}" transform="matrix(${m.map(fmt).join(' ')})" preserveAspectRatio="none" xlink:href="${href}"/>\n`
     }

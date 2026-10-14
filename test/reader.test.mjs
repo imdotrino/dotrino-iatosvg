@@ -94,9 +94,9 @@ test('the artboards come from the /Document dictionary', () => {
   assert.match(toSvg(doc), /viewBox="0 0 100 50"/)
 })
 
-test('decodePrivate undoes the Zstandard and zlib markers', () => {
+test('decodePrivate undoes the Zstandard and zlib markers', async () => {
   const data = Buffer.from('hola')
-  assert.equal(decodePrivate(Buffer.concat([Buffer.from('%!PS\r%AI24_ZStandard_Data'), zlib.zstdCompressSync(data)])).data.toString(), 'hola')
-  assert.equal(decodePrivate(Buffer.concat([Buffer.from('%AI12_CompressedData'), zlib.deflateSync(data)])).data.toString(), 'hola')
-  assert.equal(decodePrivate(data).codec, null)
+  assert.equal(Buffer.from((await decodePrivate(Buffer.concat([Buffer.from('%!PS\r%AI24_ZStandard_Data'), zlib.zstdCompressSync(data)]))).data).toString(), 'hola')
+  assert.equal(Buffer.from((await decodePrivate(Buffer.concat([Buffer.from('%AI12_CompressedData'), zlib.deflateSync(data)]))).data).toString(), 'hola')
+  assert.equal((await decodePrivate(data)).codec, null)
 })

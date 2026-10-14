@@ -16,11 +16,8 @@
 //   `%_`        líneas con el "aspecto dibujado" de objetos con estilos: un grupo oculto delante
 //               del objeto, y `1 (estilo) XW` detrás. Se dibuja el aspecto, no el objeto.
 import { Lexer, text } from './lexer.mjs'
-import fs from 'node:fs'
-import path from 'node:path'
-import { encodePng, imageSize } from './png.mjs'
-import { decodePsd, downscale } from './psd.mjs'
-import { STEPS, LUT } from './cmyk-lut.mjs'
+import { fromHex, latin1 } from './bytes.mjs'
+import { cmykToRgb, cmyk8ToRgb8 } from './color.mjs'
 
 const MAX_DEPTH = 256
 const CANVAS_CENTRE = 8191.5
@@ -44,7 +41,7 @@ function marker(c) {
   return m ? m[1] : word
 }
 
-// Valores de la pila: number | {s:Buffer} | {n:string} | {a:[]} | {o:Obj} | MARK
+// Valores de la pila: number | {s:Uint8Array} | {n:string} | {a:[]} | {o:Obj} | MARK
 const MARK = Symbol('[')
 const num = v => (typeof v === 'number' ? v : null)
 const nums = vals => vals.filter(v => typeof v === 'number')
@@ -72,36 +69,7 @@ const FLIP = [1, 0, 0, -1, 0, 0]
 // ---- colores ------------------------------------------------------------------------------
 
 const unit = v => Math.min(1, Math.max(0, v))
-/** CMYK → sRGB por la LUT del perfil SWOP (interpolación cuadrilineal), en 0..1. */
-export function cmykToRgb(c, m, y, k) {
-  const comps = [unit(c), unit(m), unit(y), unit(k)].map(v => v * (STEPS - 1))
-  const lo = comps.map(v => Math.min(STEPS - 2, Math.floor(v)))
-  const fr = comps.map((v, i) => v - lo[i])
-  const out = [0, 0, 0]
-  for (let bits = 0; bits < 16; bits++) {
-    let w = 1, idx = 0
-    for (let ch = 0; ch < 4; ch++) {
-      const hi = (bits >> ch) & 1
-      w *= hi ? fr[ch] : 1 - fr[ch]
-      idx = idx * STEPS + lo[ch] + hi
-    }
-    if (w === 0) continue
-    out[0] += w * LUT[idx * 3]; out[1] += w * LUT[idx * 3 + 1]; out[2] += w * LUT[idx * 3 + 2]
-  }
-  return out.map(v => v / 255)
-}
-const cmykCache = new Map()
-/** CMYK de 8 bits → RGB de 8 bits, con caché (para los píxeles de las imágenes). */
-export function cmyk8ToRgb8(c, m, y, k) {
-  const key = ((c << 24) | (m << 16) | (y << 8) | k) >>> 0
-  let v = cmykCache.get(key)
-  if (v === undefined) {
-    v = cmykToRgb(c / 255, m / 255, y / 255, k / 255).map(x => Math.round(x * 255))
-    if (cmykCache.size > 1 << 18) cmykCache.clear()
-    cmykCache.set(key, v)
-  }
-  return v
-}
+export { cmykToRgb }
 const tinted = (rgb, tint) => rgb.map(v => 1 - (1 - v) * tint)
 const solid = (rgb, extra = {}) => ({ type: 'solid', rgb, ...extra })
 
@@ -201,9 +169,7 @@ function defaultGs() {
 }
 
 export class Reader {
-  /** opts.links: directorios donde buscar los archivos enlazados; opts.maxImage: lado mayor al incrustar. */
-  constructor(data, opts = {}) {
-    this.opts = { links: [], maxImage: 2048, ...opts }
+  constructor(data) {
     this.lex = new Lexer(data)
     this.stack = []
     this.marks = []
@@ -649,13 +615,13 @@ export class Reader {
     if (!w || !h || w * h > MAX_PIXELS || ![1, 8].includes(bits)) { this.warn('an image that cannot be read was left out'); return }
     const space = this.raster ? this.raster.space : null
     const channels = space === 'DeviceGray' ? 1 : space === 'DeviceCMYK' ? 4 : space === 'DeviceRGB' ? 3 : kind === 1 ? 1 : kind === 4 ? 4 : 3
-    if (binary === 0) data = Buffer.from(data.toString('latin1').replace(/[^0-9a-fA-F]/g, ''), 'hex')
+    if (binary === 0) data = fromHex(latin1(data))
     const row = bits === 1 ? Math.ceil((w * channels) / 8) : w * channels
     const need = row * h
     if (data.length < need) { this.warn('an image whose data is cut short was left out'); return }
     const alphaLen = alpha > 0 ? w * h : 0
     const opacity = alphaLen && data.length >= need + alphaLen ? data.subarray(need, need + alphaLen) : null
-    const rgba = Buffer.alloc(w * h * 4)
+    const rgba = new Uint8Array(w * h * 4)
     let o = 0
     for (let y = 0; y < h; y++) {
       const base = y * row
@@ -673,7 +639,7 @@ export class Reader {
     const xf = mul(FLIP, [m[0], m[1], m[2], m[3], m[4], -m[5]])
     if (Math.abs(det(xf)) < 1e-12) return
     this.counts.images++
-    this.add({ type: 'image', mime: 'image/png', bytes: encodePng(w, h, rgba), w, h, xf, opacity: this.gs.opacity, blend: this.gs.blend, visible: !this.gs.hidden }, hidden)
+    this.add({ type: 'image', rgba, w, h, xf, opacity: this.gs.opacity, blend: this.gs.blend, visible: !this.gs.hidden }, hidden)
   }
 
   placeOperands(vals) {
@@ -685,49 +651,21 @@ export class Reader {
     if (path) this.place.path = path
   }
 
-  /** `~`: el archivo enlazado desde `%AI5_BeginPlace` entra como imagen con la vista previa que el archivo guarda. */
+  /** `~`: un archivo enlazado. Queda con su caja y la vista previa que el .ai guarda; el
+   *  archivo original lo busca después `resolveImages` (images.mjs), que puede ser asíncrono. */
   endPlace(hidden) {
     const p = this.place; this.place = null
-    if (!p.matrix || !p.bounds || !p.preview) { this.warn('a placed file without preview, matrix or bounds was left out'); return }
-    const prev = this.linkedFile(p.path) ?? previewPng(p.preview)
-    if (!prev) { this.warn('a placed file whose preview cannot be read was left out'); return }
+    if (!p.matrix || !p.bounds) { this.warn('a placed file without matrix or bounds was left out'); return }
     const [x0, y0, x1, y1] = p.bounds
     const bw = Math.abs(x1 - x0), bh = Math.abs(y1 - y0)
     // Los píxeles del archivo (y hacia abajo) empiezan en la esquina (llx, lly) de su caja, en
-    // coordenadas del lienzo; la matriz lleva el lienzo al espacio del arte (y lo voltea).
-    // La caja mide el archivo en píxeles; la imagen incrustada puede ser la vista previa o una reducción.
-    const overFile = [bw / prev.w, 0, 0, bh / prev.h, Math.min(x0, x1), Math.min(y0, y1)]
-    const xf = mul(p.matrix, overFile)
-    if (Math.abs(det(xf)) < 1e-12) return
+    // coordenadas del lienzo; la caja mide el archivo en píxeles, y la matriz lleva el lienzo
+    // al espacio del arte (y lo voltea). `box` lleva el cuadrado unidad a la imagen entera.
+    const box = mul(p.matrix, [bw, 0, 0, bh, Math.min(x0, x1), Math.min(y0, y1)])
+    if (Math.abs(det(box)) < 1e-12) return
     this.counts.placed++
-    this.add({ type: 'image', mime: prev.mime ?? 'image/png', bytes: prev.png, w: prev.w, h: prev.h, xf, link: p.path, file: prev.file ?? null, filePixels: [bw, bh],
+    this.add({ type: 'image', placed: true, link: p.path, box, preview: p.preview ? previewRgba(p.preview) : null, filePixels: [bw, bh],
       opacity: this.gs.opacity, blend: this.gs.blend, visible: !this.gs.hidden }, hidden)
-  }
-
-  /** El archivo enlazado, buscado por su nombre en `opts.links`: PNG/JPEG tal cual, PSD decodificado. */
-  linkedFile(link) {
-    const name = link.split(/[\\/]/).pop()
-    if (!name) return null
-    for (const dir of this.opts.links) {
-      const file = path.join(dir, name)
-      if (!fs.existsSync(file)) continue
-      try {
-        const buf = fs.readFileSync(file)
-        const size = imageSize(buf)
-        if (size) return { png: buf, w: size.w, h: size.h, mime: size.mime, file }
-        if (/\.psd$/i.test(name)) {
-          const img = downscale(decodePsd(buf), this.opts.maxImage)
-          return { png: encodePng(img.w, img.h, img.rgba), w: img.w, h: img.h, file }
-        }
-        this.warn(`placed file "${name}" is of a kind not read: its preview was used`)
-        return null
-      } catch (e) {
-        this.warn(`placed file "${name}" could not be read (${e.message}): its preview was used`)
-        return null
-      }
-    }
-    this.warn(`placed file "${name}" not found: its preview was used`)
-    return null
   }
 
   finish() {
@@ -756,21 +694,21 @@ function ungrouped(kids) {
 function matrixOf(vals) { const n = nums(vals); const m = affine(n.slice(Math.max(0, n.length - 6))); return m && Math.abs(det(m)) > 1e-12 ? m : null }
 function four(v) { const n = v.trim().split(/\s+/).map(Number); return n.length >= 4 && n.slice(0, 4).every(Number.isFinite) ? n.slice(0, 4) : null }
 
-/** La vista previa de un archivo enlazado: `w h fila bits x` y filas ARGB premultiplicado. */
-function previewPng(data) {
+/** La vista previa de un archivo enlazado: `w h fila bits x` y filas ARGB premultiplicado → { w, h, rgba }. */
+function previewRgba(data) {
   let p = 0
   while (p < data.length && (data[p] === 0x20 || data[p] === 0x0d || data[p] === 0x0a || data[p] === 0x09)) p++
   const head = []
   for (let i = 0; i < 5; i++) {
     const sp = data.indexOf(0x20, p)
     if (sp < 0) return null
-    head.push(parseInt(data.subarray(p, sp).toString('latin1'), 10))
+    head.push(parseInt(latin1(data, p, sp), 10))
     p = sp + 1
   }
   const [w, h, row, bits] = head
   if (!w || !h || w * h > MAX_PIXELS || bits !== 32 || row < w * 4) return null
   if (data.length - p < (h - 1) * row + w * 4) return null
-  const rgba = Buffer.alloc(w * h * 4)
+  const rgba = new Uint8Array(w * h * 4)
   let o = 0
   for (let y = 0; y < h; y++) {
     const base = p + y * row
@@ -780,5 +718,5 @@ function previewPng(data) {
       rgba[o++] = st(r); rgba[o++] = st(g); rgba[o++] = st(b); rgba[o++] = a
     }
   }
-  return { png: encodePng(w, h, rgba), w, h }
+  return { w, h, rgba }
 }

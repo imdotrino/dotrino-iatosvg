@@ -3,6 +3,15 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { readAi, editingData, toSvg } from './index.mjs'
 
+/** Busca un archivo enlazado por su nombre en `dirs`, en orden. */
+const resolverIn = dirs => async name => {
+  for (const dir of dirs) {
+    const file = path.join(dir, name)
+    if (fs.existsSync(file)) return new Uint8Array(fs.readFileSync(file))
+  }
+  return null
+}
+
 const args = process.argv.slice(2)
 const opts = { artboard: 0, all: false, dump: false, hiddenLayers: false, out: null, quiet: false, links: [], noLinks: false, maxImage: 2048 }
 const files = []
@@ -41,12 +50,12 @@ const log = (...m) => { if (!opts.quiet) console.error(...m) }
 let failed = 0
 for (const file of files) {
   try {
-    const buf = fs.readFileSync(file)
+    const buf = new Uint8Array(fs.readFileSync(file))
     const base = path.basename(file).replace(/\.ai$/i, '')
     const outDir = opts.out && (files.length > 1 || opts.all || isDir(opts.out) || opts.out.endsWith('/')) ? opts.out : null
     if (outDir) fs.mkdirSync(outDir, { recursive: true })
     if (opts.dump) {
-      const { data, codec } = editingData(buf)
+      const { data, codec } = await editingData(buf)
       const target = outDir ? path.join(outDir, base + '.ai.ps') : opts.out ?? base + '.ai.ps'
       fs.writeFileSync(target, data)
       log(`${file}: ${data.length} bytes of editing data (${codec ?? 'uncompressed'}) → ${target}`)
@@ -54,7 +63,7 @@ for (const file of files) {
     }
     const dir = path.dirname(path.resolve(file))
     const links = opts.noLinks ? [] : [...opts.links, dir, path.join(dir, 'Links')]
-    const doc = readAi(buf, { links, maxImage: opts.maxImage })
+    const doc = await readAi(buf, { resolveLink: links.length ? resolverIn(links) : null, maxImage: opts.maxImage })
     const boards = opts.all ? doc.artboards.map((_, i) => i) : [opts.artboard]
     for (const i of boards) {
       const svg = toSvg(doc, { artboard: i, hiddenLayers: opts.hiddenLayers, title: base })

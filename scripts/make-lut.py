@@ -14,4 +14,4 @@ open('src/cmyk-lut.mjs', 'w').write(
   '// LUT CMYK→sRGB generada con lcms2 desde el perfil %s, %d pasos por canal,\n'
   '// intención relativa colorimétrica con compensación de punto negro. Orden: c, m, y, k (k el más rápido).\n'
   '// Regenerar: scripts/make-lut.py.\n'
-  'export const STEPS = %d\nexport const LUT = Buffer.from(%s, \'base64\')\n' % (icc.split('/')[-1], N, N, json.dumps(base64.b64encode(data).decode())))
+  'import { fromBase64 } from \'./bytes.mjs\'\nexport const STEPS = %d\nexport const LUT = fromBase64(%s)\n' % (icc.split('/')[-1], N, N, json.dumps(base64.b64encode(data).decode())))
