@@ -1,0 +1,6 @@
+# Solo la cáscara pública de la herramienta es indexable.
+# Los archivos que conviertes no salen de tu equipo: nunca llegan a un servidor.
+User-agent: *
+Allow: /
+
+Sitemap: https://iatosvg.dotrino.com/sitemap.xml

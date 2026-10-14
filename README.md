@@ -1,7 +1,17 @@
 # dotrino-iatosvg
 
 Convierte archivos `.ai` de Adobe Illustrator a SVG **leyendo los datos de edición nativos**,
-no la parte PDF de compatibilidad. Node ≥ 22.15, sin dependencias.
+no la parte PDF de compatibilidad. La misma librería corre en Node (≥ 22) y en el navegador.
+
+- **App:** [iatosvg.dotrino.com](https://iatosvg.dotrino.com/) — PWA en `web/` (Vite). Convierte
+  en el aparato, en un worker: los archivos no se suben. Uso en el
+  [wiki](https://wiki.dotrino.com/herramientas/iatosvg/).
+- **CLI y librería:** `src/` (`@dotrino/iatosvg`). Dependencia única: el descompresor Zstandard
+  [fzstd](https://github.com/101arrowz/fzstd), copiado en `src/vendor/` (MIT).
+
+```bash
+cd web && npm install && npm run dev     # la PWA en http://localhost:3310
+```
 
 ```bash
 npx @dotrino/iatosvg "Arte.ai"                  # escribe Arte.svg al lado
@@ -17,7 +27,8 @@ Como módulo:
 ```js
 import fs from 'node:fs'
 import { aiToSvg, readAi, editingData } from '@dotrino/iatosvg'
-const { svg, doc } = aiToSvg(fs.readFileSync('Arte.ai'), { artboard: 0 })
+const resolveLink = async name => null   // Uint8Array del archivo enlazado, o null
+const { svg, doc } = await aiToSvg(new Uint8Array(fs.readFileSync('Arte.ai')), { artboard: 0, resolveLink })
 ```
 
 ## El formato, en corto

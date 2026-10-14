@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#1a1206"/>
+  <!-- Una curva de Bézier con sus anclas y manejadores: lo que hay dentro de un vector. -->
+  <g stroke="#f59e0b" stroke-linecap="round" fill="none">
+    <path d="M120 360 C 150 170, 330 150, 392 300" stroke-width="30"/>
+    <path d="M120 360 L 160 190 M392 300 L 336 150" stroke-width="10" stroke-opacity=".55"/>
+  </g>
+  <g fill="#fff7e6" stroke="#f59e0b" stroke-width="10">
+    <rect x="94" y="334" width="52" height="52" rx="8"/>
+    <rect x="366" y="274" width="52" height="52" rx="8"/>
+  </g>
+  <g fill="#f59e0b">
+    <circle cx="160" cy="190" r="20"/>
+    <circle cx="336" cy="150" r="20"/>
+  </g>
+</svg>

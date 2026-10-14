@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#f59e0b" />
+
+    <title>iatosvg — Convierte archivos de Illustrator (.ai) a SVG | Dotrino</title>
+    <meta name="description" content="Convierte tus archivos de Illustrator (.ai) a SVG sin subirlos a ningún lado: capas, degradados, fotos y mesas de trabajo, leídos del archivo original. Todo pasa en tu equipo." />
+    <link rel="canonical" href="https://iatosvg.dotrino.com/" />
+
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="iatosvg" />
+
+    <!-- Open Graph / Twitter (cáscara pública, sin datos de usuario) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="es_ES" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:site_name" content="Dotrino" />
+    <meta property="og:title" content="iatosvg — Archivos de Illustrator a SVG" />
+    <meta property="og:description" content="Convierte tus .ai a SVG en tu propio equipo. Tus diseños no se suben a ningún lado." />
+    <meta property="og:url" content="https://iatosvg.dotrino.com/" />
+    <meta property="og:image" content="https://iatosvg.dotrino.com/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="iatosvg — Archivos de Illustrator a SVG" />
+    <meta name="twitter:description" content="Convierte tus .ai a SVG en tu propio equipo. Tus diseños no se suben a ningún lado." />
+    <meta name="twitter:image" content="https://iatosvg.dotrino.com/og.jpg" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "iatosvg",
+        "url": "https://iatosvg.dotrino.com/",
+        "description": "Convierte archivos de Adobe Illustrator (.ai) a SVG leyendo sus datos de edición, en el navegador y sin subir nada.",
+        "applicationCategory": "DesignApplication",
+        "operatingSystem": "Web",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "publisher": { "@type": "Organization", "name": "Dotrino", "url": "https://dotrino.com/" }
+      }
+    </script>
+
+    <!-- Analítica cookieless autohospedada (GoatCounter); no cuenta en localhost/LAN. -->
+    <script>window.goatcounter = { path: function (p) { return location.hostname + p } }</script>
+    <script data-goatcounter="https://goat.dotrino.com/count" async src="https://goat.dotrino.com/count.js"></script>
+  </head>
+  <body>
+    <!-- Topbar estándar (CONVENCIONES §5). Fuera de #app: el render de la app no lo toca. -->
+    <dotrino-topbar
+      brand="iatosvg"
+      icon="/icon.svg"
+      brand-href="./"
+      profile
+      support-href="https://ko-fi.com/dotrino"
+      support-repo="imdotrino/dotrino-iatosvg"
+      support-discord="https://discord.gg/D648uq7cth">
+      <dotrino-install slot="end" data-testid="install"></dotrino-install>
+    </dotrino-topbar>
+    <main id="app"></main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -2,4 +2,7 @@ node_modules/
 out/
 .claude/
 *.svg
+!web/public/*.svg
 *.ai.ps
+web/dist/
+web/dev-dist/
