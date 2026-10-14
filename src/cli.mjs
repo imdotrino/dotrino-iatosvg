@@ -2,6 +2,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { readAi, editingData, toSvg } from './index.mjs'
+import { printUpdateNotice } from '@dotrino/update/notice'
+
+const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
 /** Busca un archivo enlazado por su nombre en `dirs`, en orden. */
 const resolverIn = dirs => async name => {
@@ -81,5 +84,7 @@ for (const file of files) {
     console.error(`${file}: ${e.message}`)
   }
 }
+// Aviso de versión nueva (CONVENCIONES §15): al final, por stderr, una vez al día.
+await printUpdateNotice({ current: VERSION, source: 'npm', pkg: '@dotrino/iatosvg', product: 'iatosvg', how: 'actualiza con: npm i -g @dotrino/iatosvg' })
 process.exit(failed ? 1 : 0)
 function isDir(p) { try { return fs.statSync(p).isDirectory() } catch { return false } }
