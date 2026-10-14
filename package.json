@@ -1,0 +1,13 @@
+{
+  "name": "iatosvg",
+  "version": "0.1.0",
+  "description": "Adobe Illustrator .ai → SVG, reading the native editing data (not the PDF-compatible part). No dependencies.",
+  "type": "module",
+  "bin": { "iatosvg": "src/cli.mjs" },
+  "main": "src/index.mjs",
+  "exports": "./src/index.mjs",
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "engines": { "node": ">=22.15" },
+  "license": "MIT",
+  "files": ["src", "README.md"]
+}
