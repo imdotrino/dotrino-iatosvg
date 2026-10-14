@@ -16,7 +16,10 @@
 //   `%_`        líneas con el "aspecto dibujado" de objetos con estilos: un grupo oculto delante
 //               del objeto, y `1 (estilo) XW` detrás. Se dibuja el aspecto, no el objeto.
 import { Lexer, text } from './lexer.mjs'
-import { encodePng } from './png.mjs'
+import fs from 'node:fs'
+import path from 'node:path'
+import { encodePng, imageSize } from './png.mjs'
+import { decodePsd, downscale } from './psd.mjs'
 import { STEPS, LUT } from './cmyk-lut.mjs'
 
 const MAX_DEPTH = 256
@@ -198,7 +201,9 @@ function defaultGs() {
 }
 
 export class Reader {
-  constructor(data) {
+  /** opts.links: directorios donde buscar los archivos enlazados; opts.maxImage: lado mayor al incrustar. */
+  constructor(data, opts = {}) {
+    this.opts = { links: [], maxImage: 2048, ...opts }
     this.lex = new Lexer(data)
     this.stack = []
     this.marks = []
@@ -684,18 +689,45 @@ export class Reader {
   endPlace(hidden) {
     const p = this.place; this.place = null
     if (!p.matrix || !p.bounds || !p.preview) { this.warn('a placed file without preview, matrix or bounds was left out'); return }
-    const prev = previewPng(p.preview)
+    const prev = this.linkedFile(p.path) ?? previewPng(p.preview)
     if (!prev) { this.warn('a placed file whose preview cannot be read was left out'); return }
     const [x0, y0, x1, y1] = p.bounds
     const bw = Math.abs(x1 - x0), bh = Math.abs(y1 - y0)
     // Los píxeles del archivo (y hacia abajo) empiezan en la esquina (llx, lly) de su caja, en
     // coordenadas del lienzo; la matriz lleva el lienzo al espacio del arte (y lo voltea).
+    // La caja mide el archivo en píxeles; la imagen incrustada puede ser la vista previa o una reducción.
     const overFile = [bw / prev.w, 0, 0, bh / prev.h, Math.min(x0, x1), Math.min(y0, y1)]
     const xf = mul(p.matrix, overFile)
     if (Math.abs(det(xf)) < 1e-12) return
     this.counts.placed++
-    this.add({ type: 'image', mime: 'image/png', bytes: prev.png, w: prev.w, h: prev.h, xf, link: p.path, filePixels: [bw, bh],
+    this.add({ type: 'image', mime: prev.mime ?? 'image/png', bytes: prev.png, w: prev.w, h: prev.h, xf, link: p.path, file: prev.file ?? null, filePixels: [bw, bh],
       opacity: this.gs.opacity, blend: this.gs.blend, visible: !this.gs.hidden }, hidden)
+  }
+
+  /** El archivo enlazado, buscado por su nombre en `opts.links`: PNG/JPEG tal cual, PSD decodificado. */
+  linkedFile(link) {
+    const name = link.split(/[\\/]/).pop()
+    if (!name) return null
+    for (const dir of this.opts.links) {
+      const file = path.join(dir, name)
+      if (!fs.existsSync(file)) continue
+      try {
+        const buf = fs.readFileSync(file)
+        const size = imageSize(buf)
+        if (size) return { png: buf, w: size.w, h: size.h, mime: size.mime, file }
+        if (/\.psd$/i.test(name)) {
+          const img = downscale(decodePsd(buf), this.opts.maxImage)
+          return { png: encodePng(img.w, img.h, img.rgba), w: img.w, h: img.h, file }
+        }
+        this.warn(`placed file "${name}" is of a kind not read: its preview was used`)
+        return null
+      } catch (e) {
+        this.warn(`placed file "${name}" could not be read (${e.message}): its preview was used`)
+        return null
+      }
+    }
+    this.warn(`placed file "${name}" not found: its preview was used`)
+    return null
   }
 
   finish() {

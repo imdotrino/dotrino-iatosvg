@@ -11,14 +11,14 @@ export function editingData(buf) {
 }
 
 /** El documento (capas, mesas de trabajo, avisos) leído de los datos nativos. */
-export function readAi(buf) {
+export function readAi(buf, opts = {}) {
   const { data } = editingData(buf)
-  return new Reader(data).run()
+  return new Reader(data, opts).run()
 }
 
 /** .ai → SVG (una mesa de trabajo). */
 export function aiToSvg(buf, opts = {}) {
-  const doc = readAi(buf)
+  const doc = readAi(buf, opts)
   return { svg: toSvg(doc, opts), doc }
 }
 export { toSvg }

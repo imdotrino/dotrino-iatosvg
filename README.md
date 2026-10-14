@@ -7,6 +7,8 @@ no la parte PDF de compatibilidad. Node ≥ 22.15, sin dependencias.
 npx @dotrino/iatosvg "Arte.ai"                  # escribe Arte.svg al lado
 iatosvg a.ai b.ai -o salida/           # varios, a un directorio
 iatosvg a.ai --all -o salida/          # un SVG por mesa de trabajo
+iatosvg a.ai --links /ruta/Links       # dónde están los archivos enlazados (por defecto: la carpeta del .ai y su Links/)
+iatosvg a.ai --no-links                # incrustar solo las vistas previas que guarda el .ai
 iatosvg a.ai --dump                    # vuelca los datos de edición decodificados (a.ai.ps)
 ```
 
@@ -61,7 +63,10 @@ la regenera con otro perfil.
 Sale: capas (las ocultas se omiten, `--hidden-layers` las deja con `display="none"`), grupos,
 trazados compuestos, recortes, rellenos y trazos sólidos, gradientes lineales y radiales (con
 foco, matriz y punto medio aproximado), opacidad y modos de fusión, imágenes incrustadas (CMYK,
-RGB, gris, con alfa) y archivos enlazados **con la vista previa que el `.ai` guarda** de ellos,
+RGB, gris, con alfa) y archivos enlazados: se buscan por nombre en la carpeta del `.ai`, en su
+`Links/` y en lo que diga `--links`; un PNG o JPEG se incrusta tal cual y un PSD se decodifica
+(imagen compuesta, 8 bits, RGB/CMYK/gris con alfa, reducido a `--max-image`, 2048 por defecto).
+Si no aparece, va **la vista previa que el `.ai` guarda** (baja resolución, y se avisa),
 mesas de trabajo, y el aspecto dibujado de los objetos con estilos y efectos.
 
 No sale (se avisa en stderr): texto editable (solo su aspecto dibujado, si el archivo lo tiene),

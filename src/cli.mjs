@@ -4,7 +4,7 @@ import path from 'node:path'
 import { readAi, editingData, toSvg } from './index.mjs'
 
 const args = process.argv.slice(2)
-const opts = { artboard: 0, all: false, dump: false, hiddenLayers: false, out: null, quiet: false }
+const opts = { artboard: 0, all: false, dump: false, hiddenLayers: false, out: null, quiet: false, links: [], noLinks: false, maxImage: 2048 }
 const files = []
 for (let i = 0; i < args.length; i++) {
   const a = args[i]
@@ -13,6 +13,9 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--all') opts.all = true
   else if (a === '--dump') opts.dump = true
   else if (a === '--hidden-layers') opts.hiddenLayers = true
+  else if (a === '--links') opts.links.push(args[++i])
+  else if (a === '--no-links') opts.noLinks = true
+  else if (a === '--max-image') opts.maxImage = Number(args[++i])
   else if (a === '-q' || a === '--quiet') opts.quiet = true
   else if (a === '-h' || a === '--help') { usage(); process.exit(0) }
   else files.push(a)
@@ -27,6 +30,9 @@ Reads the native Illustrator editing data (not the PDF-compatible part) and writ
   --artboard N     which artboard (0-based; default 0)
   --all            one SVG per artboard (<name>-<n>.svg)
   --hidden-layers  keep hidden layers (display="none") instead of dropping them
+  --links DIR      where the placed (linked) files are; repeatable. Default: the .ai's folder and its Links/
+  --no-links       do not look for placed files: embed the previews the .ai keeps
+  --max-image N    longest side when embedding a decoded PSD (default 2048)
   --dump           write the decoded editing data (<name>.ai.ps) instead of SVG
   -q               no summary on stderr`)
 }
@@ -46,7 +52,9 @@ for (const file of files) {
       log(`${file}: ${data.length} bytes of editing data (${codec ?? 'uncompressed'}) → ${target}`)
       continue
     }
-    const doc = readAi(buf)
+    const dir = path.dirname(path.resolve(file))
+    const links = opts.noLinks ? [] : [...opts.links, dir, path.join(dir, 'Links')]
+    const doc = readAi(buf, { links, maxImage: opts.maxImage })
     const boards = opts.all ? doc.artboards.map((_, i) => i) : [opts.artboard]
     for (const i of boards) {
       const svg = toSvg(doc, { artboard: i, hiddenLayers: opts.hiddenLayers, title: base })
