@@ -16,7 +16,7 @@
     "@dotrino/reputation": "0.12.0",
     "@dotrino/store": "0.12.3",
     "@dotrino/theme": "0.1.0",
-    "@dotrino/topbar": "0.15.3"
+    "@dotrino/topbar": "0.16.0"
   },
   "devDependencies": {
     "@dotrino/prerender": "0.1.0",
