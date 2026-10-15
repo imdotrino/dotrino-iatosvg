@@ -35,8 +35,8 @@ export default defineConfig({
         scope: './',
         display: 'standalone',
         orientation: 'any',
-        background_color: '#120c04',
-        theme_color: '#f59e0b',
+        background_color: '#f7fafc',
+        theme_color: '#00658c',
         launch_handler: { client_mode: 'focus-existing' },
         // Abrir un .ai con la app instalada (Chrome/Edge de escritorio).
         file_handlers: [{ action: './', accept: { 'application/illustrator': ['.ai'], 'application/pdf': ['.ai'] } }],

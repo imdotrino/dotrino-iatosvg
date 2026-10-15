@@ -1,27 +1,17 @@
+/* Los colores y las fuentes son los del ecosistema (@dotrino/theme, CONVENCIONES §5):
+   aquí solo se nombran con lo que usa esta hoja. */
 :root {
-  --bg: #120c04;
-  --panel: #1c140a;
-  --panel-2: #241a0d;
-  --line: #3a2c18;
-  --text: #fff7e6;
-  --muted: #b9a888;
-  --accent: #f59e0b;
-  --accent-ink: #1a1206;
-  --error: #f87171;
-  --dotrino-topbar-bg: #120c04;
-  --dotrino-topbar-border: #3a2c18;
-  --dotrino-topbar-text: #fff7e6;
-  --dotrino-topbar-muted: #b9a888;
-  --dotrino-topbar-accent: #f59e0b;
-  color-scheme: dark;
+  --bg: var(--dt-bg);
+  --panel: var(--dt-surface);
+  --panel-2: var(--dt-surface-2);
+  --line: var(--dt-line-soft);
+  --text: var(--dt-text);
+  --muted: var(--dt-text-dim);
+  --accent: var(--dt-accent);
+  --accent-ink: var(--dt-accent-ink);
+  --error: var(--dt-error);
 }
-* { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); color: var(--text); }
-body {
-  font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  -webkit-tap-highlight-color: transparent;
-  min-height: 100vh;
-}
+body { min-height: 100vh; }
 main {
   max-width: 1080px;
   margin: 0 auto;
@@ -39,7 +29,8 @@ h2 { font-size: 17px; margin: 0; }
   background: var(--panel);
   padding: clamp(18px, 4vw, 36px);
   text-align: center;
-  transition: border-color .15s, background .15s;
+  /* Sin transition: Chromium deja a medias una transición de un color light-dark()
+     (se pinta gris y no termina). Está anotado en el README de @dotrino/theme. */
 }
 body.dragging .drop { border-color: var(--accent); background: var(--panel-2); }
 .drop-head { display: flex; align-items: center; justify-content: center; gap: 10px; }
@@ -83,8 +74,8 @@ select {
 .notice { margin: 0; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
 
 .jobs { display: grid; gap: 14px; }
-.job { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 14px 16px; }
-.job.error { border-color: #7f1d1d; }
+.job { border: 1px solid var(--line); border-radius: var(--dt-radius); background: var(--panel); padding: 14px 16px; box-shadow: var(--dt-shadow); }
+.job.error { border-color: var(--dt-error); }
 .job p { margin: 6px 0 0; }
 .job-head { display: flex; align-items: baseline; gap: 10px; }
 .job-name { overflow-wrap: anywhere; }
@@ -100,7 +91,7 @@ select {
 
 .boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
 .board { margin: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel-2); }
-.board a:first-child { display: block; background: repeating-conic-gradient(#2a2014 0 25%, #221a0f 0 50%) 0 0 / 16px 16px; }
+.board a:first-child { display: block; background: repeating-conic-gradient(var(--dt-surface-3) 0 25%, var(--dt-surface-2) 0 50%) 0 0 / 16px 16px; }
 .board img { display: block; width: 100%; height: 200px; object-fit: contain; }
 .board figcaption { display: grid; gap: 8px; padding: 10px 12px; }
 .board figcaption .btn { justify-self: start; }

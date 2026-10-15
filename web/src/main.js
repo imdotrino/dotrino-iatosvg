@@ -11,6 +11,7 @@ import { getIdentity } from './services/identity'
 import { getReputation } from './services/reputation'
 import { getStore, loadPrefs, savePrefs, loadHistory, addHistory, clearHistory } from './services/store'
 import { MINE } from './services/compat'
+import '@dotrino/theme/theme.css'
 import './style.css'
 
 // Recarga cuando el SW nuevo toma control + re-chequeo periódico (CONVENCIONES §3).
