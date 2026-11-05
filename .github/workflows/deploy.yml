@@ -28,8 +28,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+        with: { node-version: 22, cache: npm, cache-dependency-path: "package-lock.json\nweb/package-lock.json" }
       - run: npm install
+      # La librería (raíz): sus pruebas y los tipos de las dos partes (el chequeo de la PWA
+      # necesita las dependencias de web/, ya instaladas en el paso anterior).
+      - run: npm ci
+        working-directory: .
+      - run: npm test
+        working-directory: .
+      - run: npm run type-check
+        working-directory: .
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

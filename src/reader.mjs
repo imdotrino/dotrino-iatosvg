@@ -19,6 +19,46 @@ import { Lexer, text } from './lexer.mjs'
 import { fromHex, latin1 } from './bytes.mjs'
 import { cmykToRgb, cmyk8ToRgb8 } from './color.mjs'
 
+/** @typedef {import('./types.js').Val} Val */
+/** @typedef {import('./types.js').Boxed} Boxed */
+/** @typedef {import('./types.js').Dict} Dict */
+/** @typedef {import('./types.js').Matrix} Matrix */
+/** @typedef {import('./types.js').Rgb} Rgb */
+/** @typedef {import('./types.js').Paint} Paint */
+/** @typedef {import('./types.js').SolidPaint} SolidPaint */
+/** @typedef {import('./types.js').GradientPaint} GradientPaint */
+/** @typedef {import('./types.js').GradientDef} GradientDef */
+/** @typedef {import('./types.js').Gs} Gs */
+/** @typedef {import('./types.js').Seg} Seg */
+/** @typedef {import('./types.js').ArtNode} ArtNode */
+/** @typedef {import('./types.js').PathNode} PathNode */
+/** @typedef {import('./types.js').CompoundNode} CompoundNode */
+/** @typedef {import('./types.js').GroupNode} GroupNode */
+/** @typedef {import('./types.js').LayerNode} LayerNode */
+/** @typedef {import('./types.js').Artboard} Artboard */
+/** @typedef {import('./types.js').Raster} Raster */
+/**
+ * Un contenedor abierto (capa, grupo, compuesto, recorte o diccionario).
+ * @typedef {object} Frame
+ * @property {'layer' | 'group' | 'compound' | 'clip' | 'obj'} kind
+ * @property {ArtNode[]} children
+ * @property {boolean} hidden
+ * @property {Gs} gs
+ * @property {number} base  dónde empiezan sus operandos en la pila
+ * @property {number[]} clips  índices de los hijos que son trazados de recorte
+ * @property {{ name?: string, visible?: boolean, preview?: boolean, locked?: boolean, printable?: boolean }} attrs
+ * @property {Obj} [obj]  el diccionario, en un marco `obj`
+ */
+/**
+ * Una instancia de gradiente en curso (`Bb` … `BB`).
+ * @typedef {{ stroke: boolean, name: string | null, origin: number[], angle: number, length: number, bg: Matrix | null,
+ *   xm: Matrix | null, bm: [Matrix, Matrix] | null, hilight: number[] }} Instance
+ */
+/**
+ * Un archivo enlazado en curso (`%AI5_BeginPlace` … `~`).
+ * @typedef {{ matrix: number[] | null, bounds: number[] | null, path: string, preview: Uint8Array | null }} Place
+ */
+
 const MAX_DEPTH = 256
 const CANVAS_CENTRE = 8191.5
 const MAX_PIXELS = 1 << 25
@@ -34,7 +74,10 @@ const SKIPPED = [
 ]
 const IGNORED = new Set(['Bc', 'Ae', 'AE', 'Ap', 'As', 'Xd', 'Xr', 'XG', 'Xh', 'XH', 'XF', 'D', 'X=', 'Xr', 'XI', 'Bn', 'Np', 'Pc', 'Zmz', 'XP', 'Xt', 'XT', 'XY', 'Xz', 'XQ', 'Xg', 'XD', 'Xi', 'Xs', 'XS', 'XV', 'Xv', 'XL', 'XE', 'Xe', 'XC', 'Xc', 'Xb', 'XB', 'Xn', 'Xo', 'Xq', 'Xu', 'XU', 'Xl', 'XJ', 'XZ', 'XM', 'XO', '%_'])
 
-/** Marcador de un comentario de sección sin su prefijo `AI<versión>_` (`AI14_BeginSymbol` → `BeginSymbol`). */
+/**
+ * Marcador de un comentario de sección sin su prefijo `AI<versión>_` (`AI14_BeginSymbol` → `BeginSymbol`).
+ * @param {string} c
+ */
 function marker(c) {
   const word = c.split(/[:\s]/)[0]
   const m = word.match(/^AI\d*_(.*)$/)
@@ -43,22 +86,63 @@ function marker(c) {
 
 // Valores de la pila: number | {s:Uint8Array} | {n:string} | {a:[]} | {o:Obj} | MARK
 const MARK = Symbol('[')
+/**
+ * Lo que lleva dentro un valor que no es un número ni la marca; null si es uno de esos.
+ * @param {Val | undefined} v
+ * @returns {Boxed | null}
+ */
+const boxed = v => (typeof v === 'object' && v !== null ? v : null)
+/** @param {Val | undefined} v */
 const num = v => (typeof v === 'number' ? v : null)
+/** @param {Val[]} vals */
 const nums = vals => vals.filter(v => typeof v === 'number')
-const vtext = v => (v && v.s ? text(v.s) : v && v.n !== undefined ? v.n : null)
+/**
+ * @param {Val | undefined} v
+ * @returns {string | null}
+ */
+const vtext = v => { const b = boxed(v); return b && b.s ? text(b.s) : b && b.n !== undefined ? b.n : null }
+/** @param {Val[]} vals */
 const lastText = vals => { for (let i = vals.length - 1; i >= 0; i--) { const t = vtext(vals[i]); if (t !== null) return t } return null }
-const lastArr = vals => { for (let i = vals.length - 1; i >= 0; i--) if (vals[i] && vals[i].a) return nums(vals[i].a); return null }
+/** @param {Val[]} vals */
+const lastArr = vals => { for (let i = vals.length - 1; i >= 0; i--) { const a = boxed(vals[i])?.a; if (a) return nums(a) } return null }
+/**
+ * La última cadena de `vals`: su posición y sus bytes, o null.
+ * @param {Val[]} vals
+ * @returns {{ at: number, s: Uint8Array } | null}
+ */
+const lastString = vals => { for (let i = vals.length - 1; i >= 0; i--) { const s = boxed(vals[i])?.s; if (s) return { at: i, s } } return null }
 
+/**
+ * @param {number[]} n
+ * @returns {Matrix | null}
+ */
 function affine(n) {
   if (n.length !== 6 || !n.every(Number.isFinite)) return null
   return n.slice()
 }
-export function mul(m, n) { // m ∘ n: primero n, después m
+/**
+ * m ∘ n: primero n, después m.
+ * @param {Matrix} m
+ * @param {Matrix} n
+ * @returns {Matrix}
+ */
+export function mul(m, n) {
   return [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
     m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]]
 }
+/**
+ * @param {Matrix} m
+ * @param {number} x
+ * @param {number} y
+ * @returns {[number, number]}
+ */
 export function apply(m, x, y) { return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]] }
+/** @param {Matrix} m */
 export function det(m) { return m[0] * m[3] - m[1] * m[2] }
+/**
+ * @param {Matrix} m
+ * @returns {Matrix | null}  null si no tiene inversa
+ */
 export function invert(m) {
   const d = det(m)
   if (Math.abs(d) < 1e-12) return null
@@ -68,17 +152,25 @@ const FLIP = [1, 0, 0, -1, 0, 0]
 
 // ---- colores ------------------------------------------------------------------------------
 
+/** @param {number} v */
 const unit = v => Math.min(1, Math.max(0, v))
 export { cmykToRgb }
+/** @type {(rgb: Rgb, tint: number) => Rgb} */
 const tinted = (rgb, tint) => rgb.map(v => 1 - (1 - v) * tint)
+/** @type {(rgb: Rgb, extra?: Partial<SolidPaint>) => SolidPaint} */
 const solid = (rgb, extra = {}) => ({ type: 'solid', rgb, ...extra })
 
-/** `c m y k (nombre) tinta x` o `c m y k [r g b | L a b] (nombre) tinta tipo Xx` (tipo 1 RGB, 2 Lab). */
+/**
+ * `c m y k (nombre) tinta x` o `c m y k [r g b | L a b] (nombre) tinta tipo Xx` (tipo 1 RGB, 2 Lab).
+ * @param {Val[]} vals
+ * @param {boolean | undefined} forceRgb
+ * @returns {SolidPaint | null}
+ */
 function named(vals, forceRgb) {
-  let at = -1
-  for (let i = vals.length - 1; i >= 0; i--) if (vals[i] && vals[i].s) { at = i; break }
-  if (at < 0) return null
-  const name = text(vals[at].s)
+  const str = lastString(vals)
+  if (!str) return null
+  const { at } = str
+  const name = text(str.s)
   const before = nums(vals.slice(0, at))
   const after = nums(vals.slice(at + 1))
   if (!after.length) return null
@@ -91,27 +183,42 @@ function named(vals, forceRgb) {
     rgb = before.slice(n - 3).map(unit)
   } else if (forceRgb === undefined && kind === 2) {
     if (n < 3) return null
-    rgb = labToRgb(...before.slice(n - 3))
+    rgb = labToRgb(before[n - 3], before[n - 2], before[n - 1])
   } else {
     const from = n >= 7 ? n - 7 : n - 4
     if (from < 0) return null
-    rgb = cmykToRgb(...before.slice(from, from + 4))
+    const [c, m, y, k] = before.slice(from, from + 4)
+    rgb = cmykToRgb(c, m, y, k)
   }
   return solid(tinted(rgb, tint), { swatch: name, tint })
 }
+/**
+ * @param {number} L
+ * @param {number} a
+ * @param {number} b
+ * @returns {Rgb}
+ */
 function labToRgb(L, a, b) {
   let y = (L + 16) / 116, x = a / 500 + y, z = y - b / 200
+  /** @param {number} t */
   const f = t => (t ** 3 > 0.008856 ? t ** 3 : (t - 16 / 116) / 7.787)
   x = 0.95047 * f(x); y = 1.0 * f(y); z = 1.08883 * f(z)
+  /** @param {number} v */
   const g = v => { v = v > 0.0031308 ? 1.055 * v ** (1 / 2.4) - 0.055 : 12.92 * v; return unit(v) }
   return [g(3.2406 * x - 1.5372 * y - 0.4986 * z), g(-0.9689 * x + 1.8758 * y + 0.0415 * z), g(0.0557 * x - 0.204 * y + 1.057 * z)]
 }
+/**
+ * @param {string} op
+ * @param {Val[]} vals
+ * @returns {SolidPaint | null}
+ */
 function colorOp(op, vals) {
   const n = nums(vals)
+  /** @param {number} k */
   const last = k => (n.length >= k ? n.slice(n.length - k) : null)
   switch (op.toLowerCase()) {
     case 'g': return n.length ? solid([1 - unit(n[n.length - 1])].flatMap(v => [v, v, v])) : null
-    case 'k': { const v = last(4); return v ? solid(cmykToRgb(...v), { cmyk: v }) : null }
+    case 'k': { const v = last(4); return v ? solid(cmykToRgb(v[0], v[1], v[2], v[3]), { cmyk: v }) : null }
     case 'xa': { const v = last(3); return v ? solid(v.map(unit)) : null }
     case 'x': return named(vals, false)
     case 'xx': return named(vals, undefined)
@@ -119,12 +226,18 @@ function colorOp(op, vals) {
     default: return null
   }
 }
+/**
+ * @param {number} style
+ * @param {Val[]} comps
+ * @returns {Rgb | null}
+ */
 function stopColor(style, comps) {
   const n = nums(comps)
+  /** @param {number} k */
   const tail = k => (n.length >= k ? n.slice(n.length - k) : null)
   switch (style | 0) {
     case 0: return n.length ? [1 - unit(n[n.length - 1])].flatMap(v => [v, v, v]) : null
-    case 1: { const v = tail(4); return v ? cmykToRgb(...v) : null }
+    case 1: { const v = tail(4); return v ? cmykToRgb(v[0], v[1], v[2], v[3]) : null }
     case 2: { const v = tail(3); return v ? v.map(unit) : null }
     default: { const p = named(comps, (style | 0) === 4 ? true : undefined); return p ? p.rgb : null }
   }
@@ -132,74 +245,135 @@ function stopColor(style, comps) {
 
 // ---- diccionarios ---------------------------------------------------------------------------
 
+/** @implements {Dict} */
 class Obj {
-  constructor(ty) { this.ty = ty; this.entries = []; this.content = [] }
+  /** @param {string} ty */
+  constructor(ty) {
+    this.ty = ty
+    /** @type {[string | null, Val[]][]} */
+    this.entries = []
+    /** @type {Val[]} */
+    this.content = []
+  }
+  /** @param {string} key */
   get(key) { const e = this.entries.find(([k]) => k === key); return e ? e[1] : null }
+  /** @param {string} key */
   nums(key) { return nums(this.get(key) ?? []) }
-  text(key) { const v = (this.get(key) ?? []).find(x => x && x.s); return v ? text(v.s) : null }
-  items() { return [...this.entries.flatMap(([, v]) => v), ...this.content].filter(v => v && v.o).map(v => v.o) }
+  /** @param {string} key */
+  text(key) { for (const x of this.get(key) ?? []) { const s = boxed(x)?.s; if (s) return text(s) } return null }
+  /** @returns {Dict[]} */
+  items() { return [...this.entries.flatMap(([, v]) => v), ...this.content].flatMap(v => { const o = boxed(v)?.o; return o ? [o] : [] }) }
 }
+/**
+ * @param {Dict} o
+ * @param {Val[]} stack
+ * @param {number} base
+ */
 function addEntry(o, stack, base) {
   const vals = stack.splice(Math.min(base, stack.length))
   if (o.ty === 'Array') { o.entries.push([null, vals]); return }
   let key = null
-  const last = vals[vals.length - 1]
+  const last = boxed(vals[vals.length - 1])
   if (last && (last.s || last.n !== undefined)) { vals.pop(); key = vtext(last) }
   o.entries.push([key, vals])
 }
+/**
+ * @param {Dict} o
+ * @param {Val[]} stack
+ * @param {number} base
+ */
 function closeObj(o, stack, base) {
   if (stack.length <= base) return
-  const last = stack[stack.length - 1]
+  const last = boxed(stack[stack.length - 1])
   if (o.ty !== 'Array' && last && last.n !== undefined) addEntry(o, stack, base)
   else o.content.push(...stack.splice(base))
 }
+/**
+ * @param {Dict} o
+ * @param {string} key
+ * @param {number} depth
+ * @returns {Dict | null}
+ */
 function findEntry(o, key, depth) {
   const direct = o.get(key)
-  if (direct) { const v = direct.find(x => x && x.o); if (v) return v.o }
+  if (direct) { for (const x of direct) { const v = boxed(x)?.o; if (v) return v } }
   if (depth >= 8) return null
   for (const item of o.items()) { const f = findEntry(item, key, depth + 1); if (f) return f }
   return null
 }
 
+/**
+ * El diccionario de un marco `obj` (lo pone `:` al abrirlo).
+ * @param {Frame} f
+ * @returns {Obj}
+ */
+function objOf(f) {
+  if (!f.obj) throw new Error('a dictionary frame without its dictionary')
+  return f.obj
+}
+
 // ---- el lector --------------------------------------------------------------------------------
 
+/** @returns {Gs} */
 function defaultGs() {
   return { fill: solid([0, 0, 0]), stroke: solid([0, 0, 0]), width: 1, cap: 'butt', join: 'miter', miter: 4, dash: null,
     rule: 'nonzero', opacity: 1, blend: 'normal', hidden: false, locked: false, overprintFill: false, overprintStroke: false }
 }
 
 export class Reader {
+  /** @param {Uint8Array} data  los datos de edición decodificados */
   constructor(data) {
     this.lex = new Lexer(data)
+    /** @type {Val[]} */
     this.stack = []
+    /** @type {number[]} */
     this.marks = []
+    /** @type {Frame[]} */
     this.frames = []
+    /** @type {LayerNode[]} */
     this.layers = []
     this.gs = defaultGs()
+    /** @type {Seg[]} */
     this.path = []
     this.clipNext = false
+    /** @type {Map<string, GradientDef>} */
     this.gradients = new Map()
+    /** @type {GradientDef | null} */
     this.gradientDef = null
+    /** @type {Instance | null} */
     this.instance = null
+    /** @type {Paint | null} */
     this.pendingFill = null
+    /** @type {Paint | null} */
     this.pendingStroke = null
+    /** @type {{ space: string | null } | null} */
     this.raster = null
+    /** @type {Place | null} */
     this.place = null
     this.afterObject = false
     this.groupEnded = false
+    /** @type {Artboard[]} */
     this.artboards = []
+    /** @type {number[] | null} */
     this.cropmarks = null
+    /** @type {number[] | null} */
     this.templateCenter = null
+    /** @type {number[] | null} */
     this.bbox = null
+    /** @type {string | null} */
     this.colorModel = null
+    /** @type {Set<string>} */
     this.warnings = new Set()
+    /** @type {Set<string>} */
     this.unknown = new Set()
     this.counts = { paths: 0, images: 0, placed: 0, groups: 0, looks: 0 }
     this.done = false
   }
 
+  /** @param {string} w */
   warn(w) { this.warnings.add(w) }
 
+  /** Lee todo el programa. @returns {import('./types.js').AiDocument} */
   run() {
     let t
     while (!this.done && (t = this.lex.next())) {
@@ -218,6 +392,7 @@ export class Reader {
   }
 
   // ---- comentarios ----
+  /** @param {string} c */
   comment(c) {
     const line = c.trimEnd()
     const m = marker(line)
@@ -238,7 +413,11 @@ export class Reader {
     else if (line.startsWith('AI9_ColorModel:')) this.colorModel = line.slice(15).trim()
   }
 
-  /** Salta hasta el comentario con marcador `end` (las secciones iguales anidadas cuentan). */
+  /**
+   * Salta hasta el comentario con marcador `end` (las secciones iguales anidadas cuentan).
+   * @param {string} end
+   * @param {string} [begin]
+   */
   skipTo(end, begin = '') {
     if (end === 'End_Versioned_Content') begin = 'Begin_Content_if_version_gt'
     let depth = 0, t
@@ -252,17 +431,32 @@ export class Reader {
   }
 
   // ---- marcos ----
+  /**
+   * @param {Frame['kind']} kind
+   * @param {boolean} hidden
+   */
   open(kind, hidden) {
     if (this.frames.length >= MAX_DEPTH) throw new Error('objects nested too deeply')
     const base = kind === 'obj' ? this.stack.length : (this.frames.length ? this.frames[this.frames.length - 1].base : 0)
     this.frames.push({ kind, children: [], hidden, gs: { ...this.gs }, base, clips: [], attrs: {} })
     this.afterObject = false
   }
+  /** @returns {Frame | undefined} */
   top() { return this.frames[this.frames.length - 1] }
+  /** El marco abierto; sin ninguno, el arte está fuera de sus capas. */
+  mustTop() {
+    const f = this.top()
+    if (!f) throw new Error('art outside its layers')
+    return f
+  }
   operands() {
-    const base = Math.min(this.top() ? this.top().base : 0, this.stack.length)
+    const base = Math.min(this.top()?.base ?? 0, this.stack.length)
     return this.stack.splice(base)
   }
+  /**
+   * @param {ArtNode} node
+   * @param {boolean} hidden
+   */
   add(node, hidden) {
     node.hidden = hidden
     const f = this.top()
@@ -273,29 +467,36 @@ export class Reader {
   }
 
   // ---- operadores ----
+  /**
+   * @param {string} w
+   * @param {boolean} hidden
+   */
   op(w, hidden) {
     if (w === '[') { this.marks.push(this.stack.length); this.stack.push(MARK); return }
     if (w === ']') {
       let at = this.stack.length
-      while (this.marks.length) { const m = this.marks.pop(); if (this.stack[m] === MARK) { at = m; break } }
+      for (let m = this.marks.pop(); m !== undefined; m = this.marks.pop()) { if (this.stack[m] === MARK) { at = m; break } }
       const items = this.stack.splice(at).slice(1)
       this.stack.push({ a: items })
       return
     }
     if (w === ':') { // abre un diccionario: su tipo es el nombre de encima
-      const ty = this.stack.length && this.stack[this.stack.length - 1].n !== undefined ? this.stack.pop().n : ''
+      const name = boxed(this.stack[this.stack.length - 1])?.n
+      let ty = ''
+      if (name !== undefined) { this.stack.pop(); ty = name }
       this.open('obj', hidden)
-      this.top().obj = new Obj(ty)
+      this.frames[this.frames.length - 1].obj = new Obj(ty)
       return
     }
     if (w === ',') {
       const f = this.top()
       if (f && f.kind === 'obj') {
-        addEntry(f.obj, this.stack, f.base)
-        const last = f.obj.entries[f.obj.entries.length - 1]
+        const o = objOf(f)
+        addEntry(o, this.stack, f.base)
+        const last = o.entries[o.entries.length - 1]
         const key = last ? last[0] : null
-        if (f.obj.ty === 'Binary' && key === 'ASCII85Decode') this.lex.skipPast('~>')
-        else if (f.obj.ty === 'ForeignObject' && key === 'Data') { this.lex.skipPast('~>'); this.warn('non-native art (a placed PDF) was left out') }
+        if (o.ty === 'Binary' && key === 'ASCII85Decode') this.lex.skipPast('~>')
+        else if (o.ty === 'ForeignObject' && key === 'Data') { this.lex.skipPast('~>'); this.warn('non-native art (a placed PDF) was left out') }
       }
       return
     }
@@ -306,8 +507,8 @@ export class Reader {
     const vals = this.operands()
 
     if (this.gradientDef) {
-      if (w === 'Bs') this.gradientStop(vals)
-      else if (w === 'BD') this.gradientEnd()
+      if (w === 'Bs') this.gradientStop(this.gradientDef, vals)
+      else if (w === 'BD') this.gradientEnd(this.gradientDef)
       return
     }
     if (w === 'X!' || this.mesh) {
@@ -339,10 +540,10 @@ export class Reader {
       case 'O': this.gs.overprintFill = nums(vals).pop() === 1; break
       case 'R': this.gs.overprintStroke = nums(vals).pop() === 1; break
       case 'XR': this.gs.rule = nums(vals).pop() === 1 ? 'evenodd' : 'nonzero'; break
-      case 'w': { const v = nums(vals).pop(); if (v >= 0) this.gs.width = v; break }
-      case 'J': this.gs.cap = ['butt', 'round', 'square'][nums(vals).pop() | 0] ?? 'butt'; break
-      case 'j': this.gs.join = ['miter', 'round', 'bevel'][nums(vals).pop() | 0] ?? 'miter'; break
-      case 'M': { const v = nums(vals).pop(); if (v >= 1) this.gs.miter = Math.min(v, 500); break }
+      case 'w': { const v = nums(vals).pop(); if (v !== undefined && v >= 0) this.gs.width = v; break }
+      case 'J': this.gs.cap = ['butt', 'round', 'square'][(nums(vals).pop() ?? 0) | 0] ?? 'butt'; break
+      case 'j': this.gs.join = ['miter', 'round', 'bevel'][(nums(vals).pop() ?? 0) | 0] ?? 'miter'; break
+      case 'M': { const v = nums(vals).pop(); if (v !== undefined && v >= 1) this.gs.miter = Math.min(v, 500); break }
       case 'd': {
         const pattern = lastArr(vals) ?? []
         const offset = nums(vals).pop() ?? 0
@@ -358,10 +559,10 @@ export class Reader {
       case 'Bs': case 'BD': break
       case 'Bb': this.instance = { stroke: nums(vals).pop() === 1, name: null, origin: [0, 0], angle: 0, length: 1, bg: null, xm: null, bm: null, hilight: [0, 0] }; break
       case 'Bg': if (this.instance) {
-        let at = -1; for (let i = vals.length - 1; i >= 0; i--) if (vals[i] && vals[i].s) { at = i; break }
-        if (at >= 0) {
-          this.instance.name = text(vals[at].s)
-          const n = nums(vals.slice(at + 1))
+        const str = lastString(vals)
+        if (str) {
+          this.instance.name = text(str.s)
+          const n = nums(vals.slice(str.at + 1))
           if (n.length >= 4) { this.instance.origin = [n[0], n[1]]; this.instance.angle = n[2]; this.instance.length = n[3]; this.instance.bg = affine(n.slice(4, 10)) }
         }
       } break
@@ -370,8 +571,8 @@ export class Reader {
       case 'Bh': if (this.instance) { const n = nums(vals); if (n.length >= 2) this.instance.hilight = [n[0], n[1]] } break
       case 'BB': if (this.instance) { const i = this.instance; this.instance = null; if (this.path.length) this.setInstance(i) } break
       case 'XN': if (this.raster) this.raster.space = lastText(vals); break
-      case '`': if (this.place) this.placeOperands(vals); break
-      case '~': if (this.place) { if (!this.place.matrix) this.placeOperands(vals); this.endPlace(hidden) } break
+      case '`': if (this.place) this.placeOperands(this.place, vals); break
+      case '~': if (this.place) { if (!this.place.matrix) this.placeOperands(this.place, vals); this.endPlace(this.place, hidden) } break
       case 'To': case 'TO': case 'Tp': case 'TP': case 'Tx': case 'TX': case 'Tj': case 'Tk':
         this.warn('type objects are not read: only their drawn look (if the file keeps one)'); break
       default:
@@ -384,14 +585,15 @@ export class Reader {
     const f = this.top()
     if (!f || f.kind !== 'obj') return
     this.frames.pop()
-    closeObj(f.obj, this.stack, f.base)
-    const o = f.obj
+    const o = objOf(f)
+    closeObj(o, this.stack, f.base)
     if (o.ty === 'Document') this.document(o)
     else if (o.ty === 'ArtDictionary') { const name = o.text('AIArtName'); if (name && this.afterObject && this.lastObject) this.lastObject.name = name }
     else if (o.ty === 'SymbolInstance') this.warn('symbol instances are not drawn')
     this.stack.push({ o })
   }
 
+  /** @param {Dict} o */
   document(o) {
     const list = findEntry(o, 'ArtboardArray', 0)
     if (!list) return
@@ -404,10 +606,12 @@ export class Reader {
     })
   }
 
+  /** @param {Val[]} vals */
   layerAttrs(vals) {
     const f = this.top()
     if (!f || f.kind !== 'layer') return
     const n = nums(vals)
+    /** @type {(i: number, d: boolean) => boolean} */
     const flag = (i, d) => (n[i] === undefined ? d : n[i] !== 0)
     f.attrs.visible = flag(0, true)
     f.attrs.preview = flag(1, true)
@@ -418,18 +622,29 @@ export class Reader {
   endLayer() {
     const f = this.frames.pop()
     if (!f || f.kind !== 'layer') throw new Error('`LB` closes something it did not open')
+    /** @type {LayerNode} */
     const node = { type: 'layer', name: f.attrs.name ?? '', visible: f.attrs.visible !== false, printable: f.attrs.printable !== false,
       ...this.clipFirst(f.children, f.clips), hidden: false }
-    if (this.frames.length) { this.top().children.push(node); this.afterObject = true } else this.layers.push(node)
+    const parent = this.top()
+    if (parent) { parent.children.push(node); this.afterObject = true } else this.layers.push(node)
   }
 
+  /**
+   * @param {string} w
+   * @param {boolean} hidden
+   */
   endContainer(w, hidden) {
-    const want = { U: 'group', '*U': 'compound', Q: 'clip' }[w]
+    /** @type {Record<string, Frame['kind']>} */
+    const closes = { U: 'group', '*U': 'compound', Q: 'clip' }
+    const want = closes[w]
     const f = this.frames.pop()
     if (!f || f.kind !== want) throw new Error(`\`${w}\` closes something it did not open`)
     const clipping = f.kind === 'compound' && f.clips.length > 0
     this.groupEnded = f.kind !== 'compound'
-    let node, painted = null
+    /** @type {CompoundNode | GroupNode | null} */
+    let node
+    /** @type {CompoundNode | null} */
+    let painted = null
     if (f.kind === 'compound' && !f.children.some(k => k.look)) {
       const kids = ungrouped(f.children)
       const fills = kids.filter(k => k.clipFillCopy), rest = kids.filter(k => !k.clipFillCopy)
@@ -441,21 +656,32 @@ export class Reader {
       node = { type: 'group', ...this.clipFirst(f.children, f.clips), opacity: 1, blend: 'normal' }
       this.counts.groups++
     }
-    if (clipping) this.top().clips.push(this.top().children.length)
+    if (clipping) { const parent = this.mustTop(); parent.clips.push(parent.children.length) }
     this.add(node, f.hidden || hidden)
     if (painted) { painted.clipFillCopy = true; this.add(painted, f.hidden || hidden) }
   }
 
+  /**
+   * @param {PathNode[]} kids
+   * @param {Gs} gs
+   * @returns {CompoundNode | null}
+   */
   compound(kids, gs) {
     if (!kids.length) return null
     const shown = [...kids].reverse().find(k => k.fill || k.stroke) ?? kids[kids.length - 1]
+    /** @type {CompoundNode} */
     const node = { type: 'compound', children: kids, fill: shown.fill, stroke: shown.stroke, strokeProps: shown.strokeProps,
       rule: shown.rule, opacity: shown.opacity, blend: shown.blend, visible: kids.every(k => k.visible !== false) || shown.visible !== false }
     for (const k of kids) { k.opacity = 1; k.blend = 'normal' }
     return node
   }
 
-  /** Los hijos con los trazados de recorte aparte: { children, clip: [paths] | null }. */
+  /**
+   * Los hijos con los trazados de recorte aparte: { children, clip: [paths] | null }.
+   * @param {ArtNode[]} kids
+   * @param {number[]} clips
+   * @returns {{ children: ArtNode[], clip: ArtNode[] | null }}
+   */
   clipFirst(kids, clips) {
     const clipNodes = kids.filter((_, i) => clips.includes(i))
     const rest = kids.filter((_, i) => !clips.includes(i))
@@ -464,8 +690,13 @@ export class Reader {
   }
 
   // ---- trazados ----
+  /**
+   * @param {string} w
+   * @param {Val[]} vals
+   */
   pathOp(w, vals) {
     const n = nums(vals)
+    /** @type {(i: number) => [number, number] | null} */
     const p = i => (n.length >= i ? [n[n.length - i], n[n.length - i + 1]] : null)
     const cur = this.current()
     switch (w) {
@@ -476,19 +707,26 @@ export class Reader {
       default: { const a = p(4), c = p(2); if (cur && a && c) this.path.push(['C', ...a, ...c, ...c]) }
     }
   }
+  /** @returns {[number, number] | null} */
   current() {
     for (let i = this.path.length - 1; i >= 0; i--) {
       const s = this.path[i]
       if (s[0] === 'Z') { // tras cerrar, el punto actual es el inicio del subtrazado
-        for (let j = i - 1; j >= 0; j--) if (this.path[j][0] === 'M') return [this.path[j][1], this.path[j][2]]
+        for (let j = i - 1; j >= 0; j--) { const sj = this.path[j]; if (sj[0] === 'M') return [sj[1], sj[2]] }
         return null
       }
-      return [s[s.length - 2], s[s.length - 1]]
+      // El punto final de M, L y C son sus dos últimos números.
+      return [/** @type {number} */ (s[s.length - 2]), /** @type {number} */ (s[s.length - 1])]
     }
     return null
   }
   closePath() { if (this.path.length && this.path[this.path.length - 1][0] !== 'Z') this.path.push(['Z']) }
 
+  /**
+   * @param {string} op
+   * @param {boolean} hidden
+   * @param {boolean} guide
+   */
   paint(op, hidden, guide) {
     const segs = this.path; this.path = []
     const clip = this.clipNext; this.clipNext = false
@@ -501,23 +739,26 @@ export class Reader {
     const lower = op.toLowerCase()
     const fill = (lower === 'f' || lower === 'b') && !clip
     const stroke = (lower === 's' || lower === 'b') && !clip
+    /** @type {PathNode} */
     const node = { type: 'path', segs, rule: gs.rule, clipping: clip, guide,
       fill: fill ? (fillPaint ?? gs.fill) : null,
       stroke: stroke ? (strokePaint ?? gs.stroke) : null,
       strokeProps: { width: gs.width, cap: gs.cap, join: gs.join, miter: gs.miter, dash: gs.dash },
       opacity: gs.opacity, blend: gs.blend, visible: !gs.hidden }
     this.counts.paths++
-    if (clip) this.top().clips.push(this.top().children.length)
+    if (clip) { const parent = this.mustTop(); parent.clips.push(parent.children.length) }
     // El relleno de un trazado de recorte se pinta también, bajo lo que recorta.
     const paintedToo = clip && (lower === 'f' || lower === 'b') && (fillPaint ?? gs.fill)
     this.add(node, hidden)
     if (paintedToo) {
+      /** @type {PathNode} */
       const copy = { ...node, clipping: false, fill: fillPaint ?? gs.fill, stroke: null, clipFillCopy: true }
       this.add(copy, hidden)
     }
   }
 
   // ---- transparencia y estilos ----
+  /** @param {Val[]} vals */
   transparency(vals) {
     const n = nums(vals)
     if (n.length < 2) return
@@ -531,7 +772,10 @@ export class Reader {
   }
 
   /** `n (estilo) XW` tras un objeto: con `1`, el objeto tiene un estilo y lo que va justo antes
-   *  (un grupo en líneas `%_`) es su aspecto dibujado. Se dibuja el aspecto y se quita el objeto. */
+   *  (un grupo en líneas `%_`) es su aspecto dibujado. Se dibuja el aspecto y se quita el objeto.
+   * @param {Val[]} vals
+   * @param {boolean} hidden
+   */
   styleMarker(vals, hidden) {
     const code = nums(vals).pop()
     const after = this.afterObject; this.afterObject = false
@@ -550,16 +794,21 @@ export class Reader {
   }
 
   // ---- gradientes ----
+  /** @param {Val[]} vals */
   gradientBegin(vals) {
-    const name = vtext(vals.find(v => v && v.s))
+    const name = vtext(vals.find(v => boxed(v)?.s))
     if (name === null) return
     const n = nums(vals)
     this.gradientDef = { name, kind: n[0] === 1 ? 'radial' : 'linear', stops: [] }
   }
-  gradientStop(vals) {
-    const d = this.gradientDef
+  /**
+   * @param {GradientDef} d  el gradiente que se está definiendo
+   * @param {Val[]} vals
+   */
+  gradientStop(d, vals) {
     if (d.stops.length >= 256) return
     const n = vals.length
+    /** @param {number} i */
     const at = i => (i >= 0 ? num(vals[i]) : null)
     const ramp = at(n - 1), mid = at(n - 2)
     if (ramp === null || mid === null) return
@@ -572,19 +821,25 @@ export class Reader {
     if (!rgb) return
     d.stops.push({ offset: unit(ramp / 100), rgb, opacity: unit(opacity), midpoint: Math.min(0.87, Math.max(0.13, mid / 100)) })
   }
-  gradientEnd() {
-    const d = this.gradientDef; this.gradientDef = null
+  /** @param {GradientDef} d  el gradiente que se estaba definiendo */
+  gradientEnd(d) {
+    this.gradientDef = null
     if (!d.stops.length) return
     if (d.stops[0].offset > d.stops[d.stops.length - 1].offset) d.stops.reverse()
     d.stops.sort((a, b) => a.offset - b.offset)
     this.gradients.set(d.name, d)
   }
+  /** @param {Instance} i */
   setInstance(i) {
     const paint = this.instancePaint(i)
     if (!paint) return
     if (i.stroke) this.pendingStroke = paint; else this.pendingFill = paint
   }
-  /** La pintura de una instancia en el espacio del arte: { type:'gradient', def, unit: matriz | null, line: {a,b} | null, focal } */
+  /**
+   * La pintura de una instancia en el espacio del arte: { type:'gradient', def, unit: matriz | null, line: {a,b} | null, focal }
+   * @param {Instance} i
+   * @returns {GradientPaint | null}
+   */
   instancePaint(i) {
     const def = i.name !== null ? this.gradients.get(i.name) : null
     if (!def) { if (i.name !== null) this.warn(`gradient "${i.name}" is used but not defined`); return null }
@@ -606,6 +861,10 @@ export class Reader {
   }
 
   // ---- imágenes ----
+  /**
+   * @param {Uint8Array} data
+   * @param {boolean} hidden
+   */
   image(data, hidden) {
     const vals = this.operands()
     const m = lastArr(vals)
@@ -642,19 +901,26 @@ export class Reader {
     this.add({ type: 'image', rgba, w, h, xf, opacity: this.gs.opacity, blend: this.gs.blend, visible: !this.gs.hidden }, hidden)
   }
 
-  placeOperands(vals) {
+  /**
+   * @param {Place} place
+   * @param {Val[]} vals
+   */
+  placeOperands(place, vals) {
     const m = lastArr(vals)
     const n = nums(vals)
     const path = lastText(vals)
-    if (m && m.length === 6) this.place.matrix = m
-    if (n.length >= 4) this.place.bounds = n.slice(0, 4)
-    if (path) this.place.path = path
+    if (m && m.length === 6) place.matrix = m
+    if (n.length >= 4) place.bounds = n.slice(0, 4)
+    if (path) place.path = path
   }
 
   /** `~`: un archivo enlazado. Queda con su caja y la vista previa que el .ai guarda; el
-   *  archivo original lo busca después `resolveImages` (images.mjs), que puede ser asíncrono. */
-  endPlace(hidden) {
-    const p = this.place; this.place = null
+   *  archivo original lo busca después `resolveImages` (images.mjs), que puede ser asíncrono.
+   * @param {Place} p  el archivo enlazado en curso
+   * @param {boolean} hidden
+   */
+  endPlace(p, hidden) {
+    this.place = null
     if (!p.matrix || !p.bounds) { this.warn('a placed file without matrix or bounds was left out'); return }
     const [x0, y0, x1, y1] = p.bounds
     const bw = Math.abs(x1 - x0), bh = Math.abs(y1 - y0)
@@ -668,6 +934,7 @@ export class Reader {
       opacity: this.gs.opacity, blend: this.gs.blend, visible: !this.gs.hidden }, hidden)
   }
 
+  /** @returns {import('./types.js').AiDocument} */
   finish() {
     if (this.unknown.size) this.warn(`operators not known: ${[...this.unknown].join(', ')}`)
     let artboards = this.artboards
@@ -678,7 +945,11 @@ export class Reader {
   }
 }
 
-/** Quita de cada contenedor los hijos ocultos (en líneas `%_`) que no se promovieron a aspecto dibujado. */
+/**
+ * Quita de cada contenedor los hijos ocultos (en líneas `%_`) que no se promovieron a aspecto dibujado.
+ * @param {ArtNode} node
+ * @param {boolean | undefined} parentHidden
+ */
 function prune(node, parentHidden) {
   const kids = node.children ?? []
   node.children = kids.filter(k => !(k.hidden && !parentHidden && !k.promoted))
@@ -686,18 +957,36 @@ function prune(node, parentHidden) {
   if (node.clip) node.clip = node.clip.filter(k => !(k.hidden && !parentHidden))
 }
 
+/**
+ * @param {ArtNode[]} kids
+ * @returns {PathNode[]}
+ */
 function ungrouped(kids) {
+  /** @type {PathNode[]} */
   const out = []
   for (const k of kids) { if (k.type === 'group' && !k.clip) out.push(...ungrouped(k.children)); else if (k.type === 'path') out.push(k) }
   return out
 }
+/**
+ * @param {Val[]} vals
+ * @returns {Matrix | null}
+ */
 function matrixOf(vals) { const n = nums(vals); const m = affine(n.slice(Math.max(0, n.length - 6))); return m && Math.abs(det(m)) > 1e-12 ? m : null }
+/**
+ * @param {string} v
+ * @returns {number[] | null}
+ */
 function four(v) { const n = v.trim().split(/\s+/).map(Number); return n.length >= 4 && n.slice(0, 4).every(Number.isFinite) ? n.slice(0, 4) : null }
 
-/** La vista previa de un archivo enlazado: `w h fila bits x` y filas ARGB premultiplicado → { w, h, rgba }. */
+/**
+ * La vista previa de un archivo enlazado: `w h fila bits x` y filas ARGB premultiplicado → { w, h, rgba }.
+ * @param {Uint8Array} data
+ * @returns {Raster | null}
+ */
 function previewRgba(data) {
   let p = 0
   while (p < data.length && (data[p] === 0x20 || data[p] === 0x0d || data[p] === 0x0a || data[p] === 0x09)) p++
+  /** @type {number[]} */
   const head = []
   for (let i = 0; i < 5; i++) {
     const sp = data.indexOf(0x20, p)
@@ -714,6 +1003,7 @@ function previewRgba(data) {
     const base = p + y * row
     for (let x = 0; x < w; x++) {
       const a = data[base + x * 4], r = data[base + x * 4 + 1], g = data[base + x * 4 + 2], b = data[base + x * 4 + 3]
+      /** @param {number} c */
       const st = c => (a === 0 ? 0 : Math.min(255, Math.round((c * 255) / a)))
       rgba[o++] = st(r); rgba[o++] = st(g); rgba[o++] = st(b); rgba[o++] = a
     }

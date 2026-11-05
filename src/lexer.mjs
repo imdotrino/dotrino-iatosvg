@@ -14,13 +14,22 @@ const PREVIEW_END = ascii('%AI26_EndPlacedObjectPreview')
 const DOCUMENT_BEGIN = ascii('%%BeginDocument')
 const DOCUMENT_END = ascii('%%EndDocument')
 const END_DATA = ascii('%%EndData')
+/** @type {(u8: Uint8Array, prefix: Uint8Array) => boolean} */
 const startsWith = (u8, prefix) => u8.length >= prefix.length && prefix.every((b, i) => u8[i] === b)
 
+/** @param {number} b */
 const isSpace = b => b === 0x20 || b === 0x09 || b === 0x0d || b === 0x0a || b === 0x0c || b === 0
+/** @param {number} b */
 const isEol = b => b === 0x0d || b === 0x0a
 const DELIMS = new Set([...'()<>[]{}/%'].map(c => c.charCodeAt(0)))
+/** @param {number} b */
 const isDelim = b => DELIMS.has(b)
 
+/**
+ * Un número PostScript, o null si la palabra no lo es.
+ * @param {string} w
+ * @returns {number | null}
+ */
 export function number(w) {
   if (!w.length) return null
   const f = w[0]
@@ -30,7 +39,10 @@ export function number(w) {
   return Number.isFinite(v) ? v : null
 }
 
+/** @typedef {import('./types.js').Token} Token */
+
 export class Lexer {
+  /** @param {Uint8Array} src */
   constructor(src) {
     this.src = src
     this.pos = 0
@@ -47,7 +59,10 @@ export class Lexer {
     return this.src.subarray(start, this.pos)
   }
 
-  /** Salta hasta después de `needle` y devuelve lo saltado. */
+  /**
+   * Salta hasta después de `needle` y devuelve lo saltado.
+   * @param {string} needle
+   */
   skipPast(needle) {
     const i = find(this.src, needle, this.pos)
     const end = i < 0 ? this.src.length : i + needle.length
@@ -56,6 +71,10 @@ export class Lexer {
     return out
   }
 
+  /**
+   * El siguiente token, o null al final.
+   * @returns {Token | null}
+   */
   next() {
     for (;;) {
       if (this.pos >= this.src.length) return null
@@ -102,9 +121,15 @@ export class Lexer {
     }
   }
 
-  /** Lo que una línea de comentario significa cuando abre una sección que se lee distinto. */
+  /**
+   * Lo que una línea de comentario significa cuando abre una sección que se lee distinto.
+   * @param {Uint8Array} line
+   * @returns {Token | null}
+   */
   special(line) {
-    for (const [begin, end, kind] of [[PREVIEW_BEGIN, PREVIEW_END, 'preview'], [DOCUMENT_BEGIN, DOCUMENT_END, 'comment']]) {
+    /** @type {[Uint8Array, Uint8Array, 'preview' | 'comment'][]} */
+    const sections = [[PREVIEW_BEGIN, PREVIEW_END, 'preview'], [DOCUMENT_BEGIN, DOCUMENT_END, 'comment']]
+    for (const [begin, end, kind] of sections) {
       if (startsWith(line, begin)) {
         const from = this.pos
         const i = find(this.src, end, this.pos)
@@ -154,6 +179,7 @@ export class Lexer {
 
   /** Una cadena literal tras su `(`, con los escapes deshechos. */
   string() {
+    /** @type {number[]} */
     const out = []
     let depth = 0
     while (this.pos < this.src.length) {
@@ -189,6 +215,10 @@ export class Lexer {
 /** Texto de los bytes de los datos: UTF-8, y si no, Windows-1252. */
 const UTF8 = new TextDecoder('utf-8', { fatal: true })
 const CP1252 = new TextDecoder('windows-1252')
+/**
+ * @param {Uint8Array} buf
+ * @returns {string}
+ */
 export function text (buf) {
   try { return UTF8.decode(buf) } catch { return CP1252.decode(buf) }
 }

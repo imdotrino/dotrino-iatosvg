@@ -5,22 +5,33 @@ import { imageSize, encodePng } from './png.mjs'
 import { decodePsd } from './psd.mjs'
 import { mul } from './reader.mjs'
 
+/** @typedef {import('./types.js').ArtNode} ArtNode */
+/** @typedef {import('./types.js').ImageNode} ImageNode */
+/** @typedef {{ bytes: Uint8Array, w: number, h: number, mime: string } | import('./types.js').Raster} Decoded */
+
 /**
- * @param doc lo que devuelve `Reader.run()`
- * @param opts.resolveLink async (name) => Uint8Array | null — el archivo enlazado por su nombre
- * @param opts.maxImage lado mayor al incrustar un PSD (2048)
- * @param opts.onProgress (texto) => void
+ * @param {import('./types.js').AiDocument} doc  lo que devuelve `Reader.run()`
+ * @param {import('./types.js').ResolveOptions} [opts]
+ *   `resolveLink`: async (name) => Uint8Array | null, el archivo enlazado por su nombre;
+ *   `maxImage`: lado mayor al incrustar un PSD (2048); `onProgress`: ({ step, … }) => void
+ * @returns {Promise<import('./types.js').AiDocument>}
  */
 export async function resolveImages (doc, { resolveLink = null, maxImage = 2048, onProgress = () => {} } = {}) {
+  /** @param {string} w */
   const warn = w => { if (!doc.warnings.includes(w)) doc.warnings.push(w) }
+  /** @type {ImageNode[]} */
   const images = []
+  /** @param {ArtNode} n */
   const walk = n => { if (n.type === 'image') images.push(n); for (const k of n.children ?? []) walk(k); for (const k of n.clip ?? []) walk(k) }
   doc.layers.forEach(walk)
+  /** @type {Map<string, Decoded | null>} */
   const cache = new Map()   // el mismo archivo enlazado varias veces se lee una vez
   for (const [i, n] of images.entries()) {
     if (n.placed) {
-      const name = n.link.split(/[\\/]/).pop()
+      // El último trozo de la ruta: split siempre da al menos uno.
+      const name = /** @type {string} */ (n.link.split(/[\\/]/).pop())
       onProgress({ step: 'link', name, index: i, total: images.length })
+      /** @type {Decoded | null | undefined} */
       let found = null
       if (name && resolveLink) {
         if (!cache.has(name)) cache.set(name, await loadLinked(name, resolveLink, maxImage, warn))
@@ -39,11 +50,11 @@ export async function resolveImages (doc, { resolveLink = null, maxImage = 2048,
       }
       n.preview = null
       // La caja lleva el cuadrado unidad a la imagen: cada píxel mide 1/w × 1/h de ella.
-      n.xf = mul(n.box, [1 / n.w, 0, 0, 1 / n.h, 0, 0])
+      n.xf = mul(n.box, [1 / imageWidth(n), 0, 0, 1 / imageHeight(n), 0, 0])
     }
     if (n.rgba) {
       onProgress({ step: 'encode', index: i, total: images.length })
-      n.bytes = await encodePng(n.w, n.h, n.rgba)
+      n.bytes = await encodePng(imageWidth(n), imageHeight(n), n.rgba)
       n.mime = 'image/png'
       n.rgba = null
     }
@@ -51,15 +62,39 @@ export async function resolveImages (doc, { resolveLink = null, maxImage = 2048,
   return doc
 }
 
+/**
+ * @param {string} name
+ * @param {(name: string) => Promise<Uint8Array | null>} resolveLink
+ * @param {number} maxImage
+ * @param {(w: string) => void} warn
+ * @returns {Promise<Decoded | null>}
+ */
 async function loadLinked (name, resolveLink, maxImage, warn) {
   let buf
-  try { buf = await resolveLink(name) } catch (e) { warn(`placed file "${name}" could not be read (${e.message})`); return null }
+  try { buf = await resolveLink(name) } catch (e) { warn(`placed file "${name}" could not be read (${errorMessage(e)})`); return null }
   if (!buf) return null
   const size = imageSize(buf)
   if (size) return { bytes: buf, w: size.w, h: size.h, mime: size.mime }
   if (/\.ps[db]$/i.test(name)) {
-    try { return decodePsd(buf, maxImage) } catch (e) { warn(`placed file "${name}" could not be decoded (${e.message})`); return null }
+    try { return decodePsd(buf, maxImage) } catch (e) { warn(`placed file "${name}" could not be decoded (${errorMessage(e)})`); return null }
   }
   warn(`placed file "${name}" is of a kind that is not read (only PNG, JPEG and PSD)`)
   return null
+}
+
+/** @param {unknown} e */
+function errorMessage (e) {
+  return /** @type {{ message?: unknown } | null} */ (e)?.message
+}
+
+/** @param {ImageNode} n */
+function imageWidth (n) {
+  if (n.w === undefined) throw new Error('an image without its width')
+  return n.w
+}
+
+/** @param {ImageNode} n */
+function imageHeight (n) {
+  if (n.h === undefined) throw new Error('an image without its height')
+  return n.h
 }

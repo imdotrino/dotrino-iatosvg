@@ -100,3 +100,21 @@ test('decodePrivate undoes the Zstandard and zlib markers', async () => {
   assert.equal(Buffer.from((await decodePrivate(Buffer.concat([Buffer.from('%AI12_CompressedData'), zlib.deflateSync(data)]))).data).toString(), 'hola')
   assert.equal((await decodePrivate(data)).codec, null)
 })
+
+test('a compound path that clips becomes the clipPath of its group (it used to crash toSvg)', () => {
+  const body = ['q', '*u', '0 0 m 100 0 L 100 100 L h W n', '*U', '0 0 0 1 k', '10 10 m 90 10 L 90 90 L f', 'Q'].join('\r')
+  const doc = new Reader(program(body)).run()
+  const g = doc.layers[0].children[0]
+  assert.equal(g.type, 'group')
+  assert.deepEqual(g.clip.map(k => k.type), ['compound'])
+  assert.match(toSvg(doc), /<clipPath id="clip\d+"><path clip-rule="nonzero" d="M0 100 L100 100 L100 0 Z"\/><\/clipPath>/)
+})
+
+test('a PDF stream without /Length is an error, not an empty stream', async () => {
+  const { readObject } = await import('../src/pdf.mjs')
+  const text = '%PDF-1.4\n7 0 obj\n<< /Filter /FlateDecode >>\nstream\nabc\nendstream\nendobj\n'
+  const buf = Buffer.from(text, 'latin1')
+  assert.throws(() => readObject(buf, text, 7), /Length not found/)
+  const ok = '%PDF-1.4\n7 0 obj\n<< /Length 3 >>\nstream\nabc\nendstream\nendobj\n'
+  assert.equal(Buffer.from(readObject(Buffer.from(ok, 'latin1'), ok, 7).raw).toString(), 'abc')
+})

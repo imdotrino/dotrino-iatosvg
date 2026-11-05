@@ -8,7 +8,12 @@ import { decompress as unzstd } from './vendor/fzstd.mjs'
 
 const MAX_DATA = 256 << 20
 
+/**
+ * @param {Uint8Array} raw  los streams privados unidos
+ * @returns {Promise<{ header: Uint8Array, data: Uint8Array, codec: string | null }>}
+ */
 export async function decodePrivate (raw) {
+  /** @type {[string, (b: Uint8Array) => Uint8Array | Promise<Uint8Array>][]} */
   const markers = [
     ['%AI24_ZStandard_Data', b => unzstd(b)],
     ['%AI12_CompressedData', b => inflate(b, MAX_DATA)],

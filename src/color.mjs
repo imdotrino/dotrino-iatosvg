@@ -1,9 +1,17 @@
 // Color: CMYK → sRGB por la LUT del perfil SWOP (interpolación cuadrilineal).
 import { STEPS, LUT } from './cmyk-lut.mjs'
 
+/** @param {number} v */
 const unit = v => Math.min(1, Math.max(0, v))
 
-/** CMYK (0..1) → sRGB (0..1). */
+/**
+ * CMYK (0..1) → sRGB (0..1).
+ * @param {number} c
+ * @param {number} m
+ * @param {number} y
+ * @param {number} k
+ * @returns {number[]}
+ */
 export function cmykToRgb (c, m, y, k) {
   const comps = [unit(c), unit(m), unit(y), unit(k)].map(v => v * (STEPS - 1))
   const lo = comps.map(v => Math.min(STEPS - 2, Math.floor(v)))
@@ -22,8 +30,16 @@ export function cmykToRgb (c, m, y, k) {
   return out.map(v => v / 255)
 }
 
+/** @type {Map<number, number[]>} */
 const cache = new Map()
-/** CMYK de 8 bits → RGB de 8 bits, con caché (para los píxeles de las imágenes). */
+/**
+ * CMYK de 8 bits → RGB de 8 bits, con caché (para los píxeles de las imágenes).
+ * @param {number} c
+ * @param {number} m
+ * @param {number} y
+ * @param {number} k
+ * @returns {number[]}
+ */
 export function cmyk8ToRgb8 (c, m, y, k) {
   const key = ((c << 24) | (m << 16) | (y << 8) | k) >>> 0
   let v = cache.get(key)

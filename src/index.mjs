@@ -8,7 +8,11 @@ import { resolveImages } from './images.mjs'
 import { toSvg } from './svg.mjs'
 import { concat } from './bytes.mjs'
 
-/** Los datos de edición nativos de un .ai (sus bytes), decodificados. */
+/**
+ * Los datos de edición nativos de un .ai (sus bytes), decodificados.
+ * @param {Uint8Array} bytes
+ * @returns {Promise<{ data: Uint8Array, codec: string | null }>}
+ */
 export async function editingData (bytes) {
   const raw = await privateDataRaw(bytes)
   const { header, data, codec } = await decodePrivate(raw)
@@ -17,9 +21,11 @@ export async function editingData (bytes) {
 
 /**
  * El documento leído de los datos nativos: capas, mesas de trabajo, imágenes listas y avisos.
- * @param opts.resolveLink async (name) => Uint8Array | null, para los archivos enlazados
- * @param opts.maxImage lado mayor al incrustar un PSD enlazado (2048)
- * @param opts.onProgress ({ step, … }) => void
+ * @param {Uint8Array} bytes
+ * @param {import('./types.js').ResolveOptions} [opts]
+ *   `resolveLink`: async (name) => Uint8Array | null, para los archivos enlazados;
+ *   `maxImage`: lado mayor al incrustar un PSD enlazado (2048); `onProgress`: ({ step, … }) => void
+ * @returns {Promise<import('./types.js').AiDocument>}
  */
 export async function readAi (bytes, opts = {}) {
   const onProgress = opts.onProgress ?? (() => {})
@@ -31,7 +37,12 @@ export async function readAi (bytes, opts = {}) {
   return doc
 }
 
-/** .ai → SVG de una mesa de trabajo. */
+/**
+ * .ai → SVG de una mesa de trabajo.
+ * @param {Uint8Array} bytes
+ * @param {import('./types.js').ResolveOptions & import('./types.js').SvgOptions} [opts]
+ * @returns {Promise<{ svg: string, doc: import('./types.js').AiDocument }>}
+ */
 export async function aiToSvg (bytes, opts = {}) {
   const doc = await readAi(bytes, opts)
   return { svg: toSvg(doc, opts), doc }

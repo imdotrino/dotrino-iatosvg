@@ -4,15 +4,29 @@
 import { mul, apply, invert } from './reader.mjs'
 import { toBase64 } from './bytes.mjs'
 
+/** @typedef {import('./types.js').ArtNode} ArtNode */
+/** @typedef {import('./types.js').Matrix} Matrix */
+/** @typedef {{ T: Matrix, defs: string[], ids: number, hiddenLayers: boolean }} Ctx */
+
+/** @param {number} v */
 const fmt = v => (Math.abs(v) < 1e-9 ? '0' : Number(v.toFixed(3)).toString())
+/** @param {unknown} s */
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
+/** @param {number[]} rgb */
 const hex = rgb => '#' + rgb.map(v => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, '0')).join('')
 
+/**
+ * El SVG de una mesa de trabajo del documento.
+ * @param {import('./types.js').AiDocument} doc
+ * @param {import('./types.js').SvgOptions} [opts]
+ * @returns {string}
+ */
 export function toSvg(doc, { artboard = 0, hiddenLayers = false, title = '' } = {}) {
   const ab = doc.artboards[artboard]
   if (!ab) throw new Error(`artboard ${artboard} does not exist (${doc.artboards.length} found)`)
   const T = [1, 0, 0, -1, -ab.x0, ab.y1] // arte → documento
   const w = ab.x1 - ab.x0, h = ab.y1 - ab.y0
+  /** @type {Ctx} */
   const ctx = { T, defs: [], ids: 0, hiddenLayers }
   const body = doc.layers.map(l => layer(l, ctx)).join('')
   const name = esc(ab.name || title)
@@ -22,6 +36,10 @@ export function toSvg(doc, { artboard = 0, hiddenLayers = false, title = '' } = 
     (ctx.defs.length ? `<defs>\n${ctx.defs.join('\n')}\n</defs>\n` : '') + body + '</svg>\n'
 }
 
+/**
+ * @param {import('./types.js').LayerNode} l
+ * @param {Ctx} ctx
+ */
 function layer(l, ctx) {
   if (!l.visible && !ctx.hiddenLayers) return ''
   const attrs = [`id="${esc(idOf(l.name, ctx))}"`, `data-layer="${esc(l.name)}"`]
@@ -29,20 +47,35 @@ function layer(l, ctx) {
   return `<g ${attrs.join(' ')}${clipAttr(l, ctx)}>\n${children(l.children, ctx)}</g>\n`
 }
 
+/**
+ * @param {string} name
+ * @param {Ctx} ctx
+ */
 function idOf(name, ctx) { return (name || 'layer').replace(/[^\w.-]+/g, '_') + '_' + (++ctx.ids) }
 
+/**
+ * @param {ArtNode[]} kids
+ * @param {Ctx} ctx
+ * @returns {string}
+ */
 function children(kids, ctx) { return kids.map(k => node(k, ctx)).join('') }
 
-/** El atributo clip-path de un contenedor con trazados de recorte, con su <clipPath> en defs. */
+/**
+ * El atributo clip-path de un contenedor con trazados de recorte, con su <clipPath> en defs.
+ * @param {ArtNode} n
+ * @param {Ctx} ctx
+ */
 function clipAttr(n, ctx) {
   if (!n.clip || !n.clip.length) return ''
   const id = `clip${++ctx.ids}`
-  const rule = n.clip[0].rule ?? 'nonzero'
+  const first = n.clip[0]
+  const rule = (first.type === 'path' || first.type === 'compound' ? first.rule : undefined) ?? 'nonzero'
   const d = n.clip.map(c => pathData(c, ctx)).join(' ')
   ctx.defs.push(`<clipPath id="${id}"><path clip-rule="${rule}" d="${d}"/></clipPath>`)
   return ` clip-path="url(#${id})"`
 }
 
+/** @param {ArtNode} n */
 function common(n) {
   const a = []
   if (n.opacity !== undefined && n.opacity < 1) a.push(`opacity="${fmt(n.opacity)}"`)
@@ -51,6 +84,11 @@ function common(n) {
   return a.length ? ' ' + a.join(' ') : ''
 }
 
+/**
+ * @param {ArtNode} n
+ * @param {Ctx} ctx
+ * @returns {string}
+ */
 function node(n, ctx) {
   if (n.visible === false) return ''
   switch (n.type) {
@@ -58,8 +96,7 @@ function node(n, ctx) {
     case 'group': return `<g${common(n)}${clipAttr(n, ctx)}>\n${children(n.children, ctx)}</g>\n`
     case 'compound': {
       if (n.clipping) return ''
-      const d = n.children.map(c => pathData(c, ctx)).join(' ')
-      return `<path${common(n)} d="${d}"${paintAttrs(n, ctx)}/>\n`
+      return `<path${common(n)} d="${pathData(n, ctx)}"${paintAttrs(n, ctx)}/>\n`
     }
     case 'path': {
       if (n.clipping || n.guide) return ''
@@ -70,15 +107,24 @@ function node(n, ctx) {
       if (!n.bytes || !n.xf) return ''
       const m = mul(ctx.T, n.xf)
       const href = `data:${n.mime};base64,${toBase64(n.bytes)}`
-      const link = n.link ? ` data-link="${esc(n.link)}"` : ''
+      const link = n.placed && n.link ? ` data-link="${esc(n.link)}"` : ''
       return `<image${common(n)}${link} width="${n.w}" height="${n.h}" transform="matrix(${m.map(fmt).join(' ')})" preserveAspectRatio="none" xlink:href="${href}"/>\n`
     }
     default: return ''
   }
 }
 
+/**
+ * Los datos `d` de un trazado, o de los trazados de un compuesto (un compuesto también recorta).
+ * @param {ArtNode} n
+ * @param {Ctx} ctx
+ * @returns {string}
+ */
 function pathData(n, ctx) {
+  if (n.type === 'compound') return n.children.map(c => pathData(c, ctx)).join(' ')
+  if (n.type !== 'path') throw new Error(`a ${n.type} has no path data`)
   const T = ctx.T
+  /** @type {string[]} */
   const out = []
   for (const s of n.segs) {
     switch (s[0]) {
@@ -93,10 +139,15 @@ function pathData(n, ctx) {
   return out.join(' ')
 }
 
+/**
+ * @param {import('./types.js').PathNode | import('./types.js').CompoundNode} n
+ * @param {Ctx} ctx
+ */
 function paintAttrs(n, ctx) {
   const a = [`fill="${paintRef(n.fill, ctx)}"`]
   if (n.fill && (n.rule ?? 'nonzero') === 'evenodd') a.push('fill-rule="evenodd"')
   if (n.stroke) {
+    /** @type {Partial<import('./types.js').StrokeProps>} */
     const sp = n.strokeProps ?? {}
     a.push(`stroke="${paintRef(n.stroke, ctx)}"`, `stroke-width="${fmt(sp.width ?? 1)}"`)
     if (sp.cap && sp.cap !== 'butt') a.push(`stroke-linecap="${sp.cap}"`)
@@ -107,6 +158,10 @@ function paintAttrs(n, ctx) {
   return ' ' + a.join(' ')
 }
 
+/**
+ * @param {import('./types.js').Paint | null} p
+ * @param {Ctx} ctx
+ */
 function paintRef(p, ctx) {
   if (!p) return 'none'
   if (p.type === 'solid') return hex(p.rgb)
@@ -114,10 +169,15 @@ function paintRef(p, ctx) {
   return 'none'
 }
 
-/** El gradiente en defs: unidades del usuario, con la matriz que lleva el vector (o el círculo) unidad al arte. */
+/**
+ * El gradiente en defs: unidades del usuario, con la matriz que lleva el vector (o el círculo) unidad al arte.
+ * @param {import('./types.js').GradientPaint} p
+ * @param {Ctx} ctx
+ */
 function gradientDef(p, ctx) {
   const id = `grad${++ctx.ids}`
   const m = mul(ctx.T, p.unit)
+  /** @type {Omit<import('./types.js').GradientStop, 'midpoint'>[]} */
   const stops = []
   const s = p.def.stops
   for (let i = 0; i < s.length; i++) {

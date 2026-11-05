@@ -7,18 +7,30 @@ for (let n = 0; n < 256; n++) {
   for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
   CRC_TABLE[n] = c
 }
+/** @param {Uint8Array} buf */
 function crc32 (buf) {
   let c = -1
   for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8)
   return (c ^ -1) >>> 0
 }
+/** @param {number} v */
 function u32 (v) { const b = new Uint8Array(4); view(b).setUint32(0, v); return b }
+/**
+ * @param {string} type
+ * @param {Uint8Array} data
+ */
 function chunk (type, data) {
   const td = concat([ascii(type), data])
   return concat([u32(data.length), td, u32(crc32(td))])
 }
 
-/** PNG de `rgba` (w*h*4 bytes). */
+/**
+ * PNG de `rgba` (w*h*4 bytes).
+ * @param {number} w
+ * @param {number} h
+ * @param {Uint8Array} rgba
+ * @returns {Promise<Uint8Array>}
+ */
 export async function encodePng (w, h, rgba) {
   const stride = w * 4 + 1
   const raw = new Uint8Array(stride * h)
@@ -34,7 +46,11 @@ export async function encodePng (w, h, rgba) {
   ])
 }
 
-/** { w, h, mime } de un PNG o JPEG, o null. */
+/**
+ * { w, h, mime } de un PNG o JPEG, o null.
+ * @param {Uint8Array} buf
+ * @returns {{ w: number, h: number, mime: string } | null}
+ */
 export function imageSize (buf) {
   const v = view(buf)
   if (buf.length > 24 && buf[0] === 0x89 && buf[1] === 0x50) return { w: v.getUint32(16), h: v.getUint32(20), mime: 'image/png' }

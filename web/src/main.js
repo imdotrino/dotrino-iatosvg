@@ -14,11 +14,17 @@ import { MINE } from './services/compat'
 import '@dotrino/theme/theme.css'
 import './style.css'
 
+/** @typedef {import('./types').Job} Job */
+/** @typedef {import('./types').WorkerDone} WorkerDone */
+/** @typedef {import('./types').Prefs} Prefs */
+/** @typedef {import('./types').HistoryEntry} HistoryEntry */
+
 // Recarga cuando el SW nuevo toma control + re-chequeo periódico (CONVENCIONES §3).
 const updateSW = registerSW({ immediate: true })
 setInterval(() => updateSW(), 30 * 60 * 1000)
 
 /* ---------------- i18n ---------------- */
+/** @type {Record<'es' | 'en', import('./types').Texts>} */
 const I18N = {
   es: {
     title: 'Archivos de Illustrator a SVG',
@@ -127,15 +133,21 @@ const I18N = {
 }
 
 const topbar = document.querySelector('dotrino-topbar')
+if (!topbar) throw new Error('index.html has no <dotrino-topbar>')
+/** @type {'es' | 'en'} */
 let lang = topbar?.lang === 'en' ? 'en' : 'es'
 const t = () => I18N[lang]
 topbar.addEventListener('dotrino-lang', e => { lang = e.detail?.lang === 'en' ? 'en' : 'es'; render() })
 
 /* ---------------- Estado ---------------- */
 const LINK_EXT = /\.(psd|psb|png|jpe?g)$/i
+/** @type {Job[]} */
 const jobs = []            // { id, file, status: 'queued'|'working'|'done'|'error', progress, result, error }
+/** @type {Map<string, File>} */
 const links = new Map()    // nombre en minúsculas → File
+/** @type {Prefs} */
 let prefs = { maxImage: 2048, hiddenLayers: false }
+/** @type {HistoryEntry[]} */
 let history = []
 let storeOk = true
 let infoOpen = false
@@ -164,18 +176,19 @@ let infoOpen = false
 
 /* ---------------- Conversión ---------------- */
 const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
+/** @type {Job | null} */
 let running = null
 
-worker.onmessage = ({ data }) => {
+worker.onmessage = (/** @type {MessageEvent<import('./types').WorkerReply>} */ { data }) => {
   const job = jobs.find(j => j.id === data.id)
   if (!job) return
-  if (data.progress) { job.progress = data.progress; renderJob(job); return }
-  if (data.error) { job.status = 'error'; job.error = data.error }
-  if (data.done) {
+  if ('progress' in data) { job.progress = data.progress; renderJob(job); return }
+  if ('error' in data) { job.status = 'error'; job.error = data.error }
+  if ('done' in data) {
     job.status = 'done'
     for (const ab of data.artboards) ab.url = URL.createObjectURL(ab.blob)
     job.result = data
-    remember(job)
+    remember(job, data)
   }
   running = null
   renderJob(job)
@@ -190,15 +203,19 @@ function next () {
   job.status = 'working'
   job.progress = { step: 'decode' }
   renderJob(job)
-  worker.postMessage({ id: job.id, file: job.file, links: [...links.values()], maxImage: prefs.maxImage, hiddenLayers: prefs.hiddenLayers })
+  /** @type {import('./types').WorkerRequest} */
+  const request = { id: job.id, file: job.file, links: [...links.values()], maxImage: prefs.maxImage, hiddenLayers: prefs.hiddenLayers }
+  worker.postMessage(request)
 }
 
+/** @param {File} file */
 function enqueue (file) {
   jobs.unshift({ id: crypto.randomUUID(), file, status: 'queued' })
   render()
   next()
 }
 
+/** @param {Job} job */
 function retry (job) {
   release(job)
   Object.assign(job, { status: 'queued', result: null, error: null, progress: null })
@@ -206,11 +223,15 @@ function retry (job) {
   next()
 }
 
-function release (job) { for (const ab of job.result?.artboards ?? []) URL.revokeObjectURL(ab.url) }
+/** @param {Job} job */
+function release (job) { for (const ab of job.result?.artboards ?? []) if (ab.url) URL.revokeObjectURL(ab.url) }
 
-async function remember (job) {
+/**
+ * @param {Job} job
+ * @param {WorkerDone} r  lo que acaba de devolver el worker
+ */
+async function remember (job, r) {
   if (!storeOk) return
-  const r = job.result
   const placed = r.placed.length
   const found = r.placed.filter(p => p.found).length
   try {
@@ -221,6 +242,7 @@ async function remember (job) {
 }
 
 /* ---------------- Archivos entrantes ---------------- */
+/** @param {File[]} files */
 function take (files) {
   let addedLinks = 0
   for (const f of files) {
@@ -230,13 +252,22 @@ function take (files) {
   if (addedLinks) render()
 }
 
-/** Los archivos de una carpeta soltada, recorriéndola entera. */
+/**
+ * Los archivos de una carpeta soltada, recorriéndola entera.
+ * @param {FileSystemEntry} entry
+ * @returns {Promise<File[]>}
+ */
 async function entryFiles (entry) {
-  if (entry.isFile) return [await new Promise((res, rej) => entry.file(res, rej))]
+  if (entry.isFile) {
+    const fileEntry = /** @type {FileSystemFileEntry} */ (entry)
+    return [await /** @type {Promise<File>} */ (new Promise((res, rej) => fileEntry.file(res, rej)))]
+  }
   if (!entry.isDirectory) return []
-  const reader = entry.createReader()
+  const reader = /** @type {FileSystemDirectoryEntry} */ (entry).createReader()
+  /** @type {File[]} */
   const out = []
   for (;;) {
+    /** @type {FileSystemEntry[]} */
     const batch = await new Promise((res, rej) => reader.readEntries(res, rej))
     if (!batch.length) break
     for (const e of batch) out.push(...await entryFiles(e))
@@ -249,8 +280,9 @@ window.addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.
 window.addEventListener('drop', async e => {
   e.preventDefault()
   document.body.classList.remove('dragging')
-  const items = [...(e.dataTransfer?.items ?? [])].map(i => i.webkitGetAsEntry?.()).filter(Boolean)
+  const items = [...(e.dataTransfer?.items ?? [])].map(i => i.webkitGetAsEntry?.()).filter(x => x != null)
   if (items.length) {
+    /** @type {File[]} */
     const files = []
     for (const it of items) files.push(...await entryFiles(it))
     take(files)
@@ -258,14 +290,20 @@ window.addEventListener('drop', async e => {
 })
 
 // Abrir un .ai con la app instalada (file_handlers del manifiesto).
-if ('launchQueue' in window) {
+if (window.launchQueue) {
   window.launchQueue.setConsumer(async params => {
+    /** @type {File[]} */
     const files = []
     for (const h of params.files ?? []) files.push(await h.getFile())
     take(files)
   })
 }
 
+/**
+ * @template {keyof Prefs} K
+ * @param {K} k
+ * @param {Prefs[K]} v
+ */
 async function setPref (k, v) {
   prefs = { ...prefs, [k]: v }
   render()
@@ -274,36 +312,67 @@ async function setPref (k, v) {
 }
 
 /* ---------------- Render ---------------- */
-const app = document.getElementById('app')
+const app = document.getElementById('app') ?? missingElement('#app')
 
+/**
+ * Un elemento que index.html tiene que traer: sin él la página no se puede pintar.
+ * @param {string} what
+ * @returns {never}
+ */
+function missingElement (what) { throw new Error(`index.html has no ${what}`) }
+
+/** @typedef {string | number | boolean | null | undefined | ((e: Event) => void)} Attr */
+/** @typedef {Node | string | null | undefined | false} Kid */
+
+/**
+ * Un elemento con sus atributos (`on…` son escuchas) y sus hijos.
+ * @param {string} tag
+ * @param {Record<string, Attr>} [attrs]
+ * @param {...(Kid | Kid[])} kids
+ * @returns {HTMLElement}
+ */
 function h (tag, attrs = {}, ...kids) {
   const el = document.createElement(tag)
   for (const [k, v] of Object.entries(attrs)) {
     if (v === false || v == null) continue
-    if (k.startsWith('on')) el.addEventListener(k.slice(2), v)
-    else if (k === 'class') el.className = v
-    else el.setAttribute(k, v === true ? '' : v)
+    if (k.startsWith('on')) {
+      if (typeof v !== 'function') throw new TypeError(`${k} needs a function`)
+      el.addEventListener(k.slice(2), v)
+    } else if (k === 'class') el.className = String(v)
+    else el.setAttribute(k, v === true ? '' : String(v))
   }
   for (const k of kids.flat()) if (k != null && k !== false) el.append(k)
   return el
 }
 
+/**
+ * @param {string} label
+ * @param {string} testid
+ * @param {Record<string, Attr>} attrs
+ */
 function picker (label, testid, attrs) {
-  const input = h('input', { type: 'file', hidden: true, ...attrs, onchange: e => { take([...e.target.files]); e.target.value = '' } })
+  const input = h('input', { type: 'file', hidden: true, ...attrs, onchange: e => { const el = /** @type {HTMLInputElement} */ (e.target); take([...(el.files ?? [])]); el.value = '' } })
   return h('label', { class: 'btn', 'data-testid': testid }, label, input)
 }
 
+/** @param {number} b */
 const fmtSize = b => (b > 1 << 20 ? `${(b / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`)
+/** @param {number} v */
 const fmtPt = v => `${Math.round(v)} pt`
+/** @param {number} ts */
 const fmtDate = ts => new Date(ts).toLocaleString(lang === 'en' ? 'en' : 'es', { dateStyle: 'medium', timeStyle: 'short' })
 
+/** @param {string} w */
 function plainWarning (w) {
   for (const [re, fn] of t().warn) { const m = w.match(re); if (m) return fn(m) }
   return w
 }
 
+/** @param {import('./types').JobError} err */
 function errorText (err) {
-  return t().errors[err.code] ?? t().errors.generic(err.message)
+  const errors = t().errors
+  const known = err.code ? /** @type {Record<string, unknown>} */ (errors)[err.code] : undefined
+  return typeof known === 'string' ? known : errors.generic(err.message)
 }
 
 function render () {
@@ -324,23 +393,25 @@ function render () {
       h('div', { class: 'links', 'data-testid': 'links' },
         links.size ? [h('span', {}, L.linksReady(links.size)), h('button', { class: 'link', type: 'button', onclick: () => { links.clear(); render() } }, L.clearLinks)] : h('span', { class: 'muted' }, L.linksNone)),
       h('label', { class: 'opt' }, L.maxImage, ' ',
-        h('select', { 'data-testid': 'max-image', onchange: e => setPref('maxImage', Number(e.target.value)) },
+        h('select', { 'data-testid': 'max-image', onchange: e => setPref('maxImage', Number(/** @type {HTMLSelectElement} */ (e.target).value)) },
           ...Object.entries(L.maxOpts).map(([v, label]) => h('option', { value: v, selected: Number(v) === prefs.maxImage }, label)))),
       h('label', { class: 'opt' },
-        h('input', { type: 'checkbox', 'data-testid': 'hidden-layers', checked: prefs.hiddenLayers, onchange: e => setPref('hiddenLayers', e.target.checked) }), ' ', L.hiddenLayers)),
+        h('input', { type: 'checkbox', 'data-testid': 'hidden-layers', checked: prefs.hiddenLayers, onchange: e => setPref('hiddenLayers', /** @type {HTMLInputElement} */ (e.target).checked) }), ' ', L.hiddenLayers)),
     storeOk ? null : h('p', { class: 'notice' }, L.storeProblem),
     h('section', { class: 'jobs', id: 'jobs' }, ...jobs.map(jobCard)),
     h('section', { class: 'history', id: 'history' }),
     h('footer', {}, h('p', {}, L.privacy), h('p', { class: 'muted' }, h('a', { href: lang === 'en' ? 'https://wiki.dotrino.com/en/apps/iatosvg/' : 'https://wiki.dotrino.com/apps/iatosvg/' }, L.howto), ' · ', L.version(MINE.version))),
-  ].filter(Boolean))
+  ].filter(x => x != null))
   renderHistory()
 }
 
+/** @param {Job} job */
 function renderJob (job) {
   const el = document.querySelector(`[data-job="${job.id}"]`)
   if (el) el.replaceWith(jobCard(job)); else render()
 }
 
+/** @param {Job} job */
 function jobCard (job) {
   const L = t()
   const head = h('div', { class: 'job-head' },
@@ -350,18 +421,21 @@ function jobCard (job) {
   const card = h('article', { class: `job ${job.status}`, 'data-job': job.id, 'data-testid': 'job' }, head)
   if (job.status === 'queued') card.append(h('p', { class: 'muted' }, L.queued))
   if (job.status === 'working') {
-    const p = job.progress ?? {}
-    const text = p.step === 'link' ? L.step.link(p.name) : L.step[p.step] ?? '…'
+    const p = job.progress
+    const text = p?.step === 'link' ? L.step.link(p.name) : (p ? L.step[p.step] : undefined) ?? '…'
     card.append(h('p', { class: 'working-text' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), text))
   }
   if (job.status === 'error') {
+    if (!job.error) throw new Error('a failed job without its error')
     card.append(h('p', { class: 'error' }, errorText(job.error)))
   }
   if (job.status === 'done') {
     const r = job.result
+    if (!r) throw new Error('a finished job without its result')
     const found = r.placed.filter(p => p.found).length
     const missing = r.placed.length - found
-    card.append(
+    // Sin avisos ni fotos que falten, esos dos son null: append los pintaría como el texto «null».
+    card.append(...[
       h('p', { class: 'muted' }, L.artboards(r.artboards.length), r.placed.length ? ` · ${L.photos(found, r.placed.length)}` : ''),
       h('div', { class: 'boards' }, ...r.artboards.map((ab, i) => h('figure', { class: 'board' },
         h('a', { href: ab.url, target: '_blank', rel: 'noopener', title: L.open },
@@ -371,11 +445,16 @@ function jobCard (job) {
           h('a', { class: 'btn primary', href: ab.url, download: fileName(job.file.name, r.artboards.length > 1 ? i : -1, ab.name), 'data-testid': 'download' }, L.download))))),
       r.warnings.length ? h('ul', { class: 'warnings' }, ...[...new Set(r.warnings.map(plainWarning))].map(w => h('li', {}, w))) : null,
       missing ? h('p', { class: 'hint' }, L.missingHint, ' ', h('button', { class: 'btn', type: 'button', 'data-testid': 'retry', onclick: () => retry(job) }, L.retry)) : null,
-    )
+    ].filter(x => x != null))
   }
   return card
 }
 
+/**
+ * @param {string} aiName
+ * @param {number} index  -1 si hay una sola mesa
+ * @param {string} boardName
+ */
 function fileName (aiName, index, boardName) {
   const base = aiName.replace(/\.ai$/i, '')
   if (index < 0) return `${base}.svg`

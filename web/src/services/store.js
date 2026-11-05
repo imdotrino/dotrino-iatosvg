@@ -12,7 +12,12 @@ const PREFS = 'iatosvg.prefs'
 const HISTORY = 'iatosvg.history'
 const HISTORY_MAX = 50
 
+/** @typedef {import('../types').Prefs} Prefs */
+/** @typedef {import('../types').HistoryEntry} HistoryEntry */
+
+/** @type {Promise<Store> | null} */
 let storePromise = null
+/** @returns {Promise<Store>} */
 export function getStore () {
   if (storePromise) return storePromise
   storePromise = (async () => {
@@ -26,29 +31,36 @@ export function getStore () {
   return storePromise
 }
 
+/** @returns {Promise<Partial<Prefs> | null>} */
 export async function loadPrefs () {
   const s = await getStore()
   const e = await s.listThread(PREFS, { limit: 1 })
   return e.length ? e[e.length - 1].prefs : null
 }
 
+/** @param {Prefs} prefs */
 export async function savePrefs (prefs) {
   const s = await getStore()
   await s.removeThread(PREFS)
   await s.appendMessage(PREFS, { id: 'prefs', prefs })
 }
 
+/** @returns {Promise<HistoryEntry[]>} */
 export async function loadHistory () {
   const s = await getStore()
-  return (await s.listThread(HISTORY, { limit: HISTORY_MAX })).reverse()
+  return /** @type {HistoryEntry[]} */ ((await s.listThread(HISTORY, { limit: HISTORY_MAX })).reverse())
 }
 
-/** Apunta una conversión: solo datos de la conversión, nunca el archivo. */
+/**
+ * Apunta una conversión: solo datos de la conversión, nunca el archivo.
+ * @param {Omit<HistoryEntry, 'id' | 'ts'>} entry
+ */
 export async function addHistory (entry) {
   const s = await getStore()
   await s.appendMessage(HISTORY, { id: crypto.randomUUID(), ts: Date.now(), ...entry })
 }
 
+/** Borra la lista de lo convertido. */
 export async function clearHistory () {
   const s = await getStore()
   await s.removeThread(HISTORY)

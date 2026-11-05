@@ -4,7 +4,12 @@
 import { latin1, view } from './bytes.mjs'
 import { cmyk8ToRgb8 } from './color.mjs'
 
-/** → { w, h, rgba } con el lado mayor ≤ `max`. */
+/**
+ * → { w, h, rgba } con el lado mayor ≤ `max`.
+ * @param {Uint8Array} buf
+ * @param {number} [max]
+ * @returns {import('./types.js').Raster}
+ */
 export function decodePsd (buf, max = 2048) {
   if (latin1(buf, 0, 4) !== '8BPS') throw new Error('not a PSD')
   const v = view(buf)
@@ -13,6 +18,7 @@ export function decodePsd (buf, max = 2048) {
   const depth = v.getUint16(22), mode = v.getUint16(24)
   if (depth !== 8 && depth !== 16) throw new Error(`PSD depth ${depth} not supported`)
   if (![1, 3, 4].includes(mode)) throw new Error(`PSD colour mode ${mode} not supported`)
+  /** @param {number} p */
   const len = p => (version === 2 ? Number(v.getBigUint64(p)) : v.getUint32(p))
   let p = 26
   p += 4 + v.getUint32(p)                   // datos del modo de color
@@ -27,6 +33,7 @@ export function decodePsd (buf, max = 2048) {
   const nw = Math.max(1, Math.floor(w / f)), nh = Math.max(1, Math.floor(h / f))
   const sums = Array.from({ length: used }, () => new Float32Array(nw * nh))
   const row = new Uint8Array(w * bps)
+  /** @type {(c: number, y: number) => void} */
   const addRow = (c, y) => {
     const oy = Math.floor(y / f)
     if (oy >= nh) return
@@ -55,8 +62,14 @@ export function decodePsd (buf, max = 2048) {
   const rgba = new Uint8Array(nw * nh * 4)
   const alpha = used > colour ? sums[colour] : null
   for (let i = 0; i < nw * nh; i++) {
+    /** @param {number} k */
     const at = k => Math.round(sums[k][i] / cnt)
-    let r, g, b
+    /** @type {number} */
+    let r
+    /** @type {number} */
+    let g
+    /** @type {number} */
+    let b
     if (colour === 1) r = g = b = at(0)
     else if (colour === 3) { r = at(0); g = at(1); b = at(2) }
     else [r, g, b] = cmyk8ToRgb8(255 - at(0), 255 - at(1), 255 - at(2), 255 - at(3)) // el PSD guarda el CMYK invertido
@@ -65,6 +78,12 @@ export function decodePsd (buf, max = 2048) {
   return { w: nw, h: nh, rgba }
 }
 
+/**
+ * @param {Uint8Array} src
+ * @param {number} p
+ * @param {number} len
+ * @param {Uint8Array} out
+ */
 function unpackBits (src, p, len, out) {
   const end = p + len
   let o = 0

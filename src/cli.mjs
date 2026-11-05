@@ -6,7 +6,11 @@ import { printUpdateNotice } from '@dotrino/update/notice'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
-/** Busca un archivo enlazado por su nombre en `dirs`, en orden. */
+/**
+ * Busca un archivo enlazado por su nombre en `dirs`, en orden.
+ * @param {string[]} dirs
+ * @returns {(name: string) => Promise<Uint8Array | null>}
+ */
 const resolverIn = dirs => async name => {
   for (const dir of dirs) {
     const file = path.join(dir, name)
@@ -16,7 +20,9 @@ const resolverIn = dirs => async name => {
 }
 
 const args = process.argv.slice(2)
+/** @type {{ artboard: number, all: boolean, dump: boolean, hiddenLayers: boolean, out: string | null, quiet: boolean, links: string[], noLinks: boolean, maxImage: number }} */
 const opts = { artboard: 0, all: false, dump: false, hiddenLayers: false, out: null, quiet: false, links: [], noLinks: false, maxImage: 2048 }
+/** @type {string[]} */
 const files = []
 for (let i = 0; i < args.length; i++) {
   const a = args[i]
@@ -49,6 +55,7 @@ Reads the native Illustrator editing data (not the PDF-compatible part) and writ
   -q               no summary on stderr`)
 }
 
+/** @param {...unknown} m */
 const log = (...m) => { if (!opts.quiet) console.error(...m) }
 let failed = 0
 for (const file of files) {
@@ -81,10 +88,11 @@ for (const file of files) {
     for (const w of doc.warnings) log(`  warning: ${w}`)
   } catch (e) {
     failed++
-    console.error(`${file}: ${e.message}`)
+    console.error(`${file}: ${/** @type {{ message?: unknown } | null} */ (e)?.message}`)
   }
 }
 // Aviso de versión nueva (CONVENCIONES §15): al final, por stderr, una vez al día.
 await printUpdateNotice({ current: VERSION, source: 'npm', pkg: '@dotrino/iatosvg', product: 'iatosvg', how: 'actualiza con: npm i -g @dotrino/iatosvg' })
 process.exit(failed ? 1 : 0)
+/** @param {string} p */
 function isDir(p) { try { return fs.statSync(p).isDirectory() } catch { return false } }
